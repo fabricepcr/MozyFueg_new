@@ -1,0 +1,45 @@
+{
+  "name": "StoreSettings",
+  "type": "object",
+  "properties": {
+    "singleton_key": {
+      "type": "string",
+      "description": "Clave \u00fanica para upsert (siempre 'main')",
+      "default": "main"
+    },
+    "store_open": {
+      "type": "boolean",
+      "default": true,
+      "description": "Si la tienda/restaurante est\u00e1 abierta y acepta pedidos"
+    },
+    "delivery_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Si el reparto a domicilio est\u00e1 activo"
+    },
+    "pickup_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Si la recogida en local est\u00e1 activa"
+    }
+  },
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {},
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  },
+  "required": []
+}

@@ -1,0 +1,88 @@
+{
+  "name": "Reservation",
+  "type": "object",
+  "properties": {
+    "customer_name": {
+      "type": "string",
+      "description": "Nombre del cliente"
+    },
+    "customer_phone": {
+      "type": "string",
+      "description": "Tel\u00e9fono del cliente"
+    },
+    "guests": {
+      "type": "number",
+      "description": "N\u00famero de personas"
+    },
+    "desired_date": {
+      "type": "string",
+      "description": "Fecha deseada"
+    },
+    "desired_time": {
+      "type": "string",
+      "description": "Hora deseada"
+    },
+    "message": {
+      "type": "string",
+      "description": "Mensaje adicional"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "confirmed",
+        "cancelled"
+      ],
+      "default": "pending",
+      "description": "Estado de la reserva"
+    }
+  },
+  "required": [
+    "customer_name",
+    "customer_phone",
+    "guests",
+    "desired_date",
+    "desired_time"
+  ],
+  "rls": {
+    "create": {
+      "created_by": "{{user.email}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

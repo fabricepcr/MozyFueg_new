@@ -1,0 +1,209 @@
+{
+  "name": "DeliverySettings",
+  "type": "object",
+  "properties": {
+    "singleton_key": {
+      "type": "string",
+      "description": "Clave \u00fanica para upsert (siempre 'main')",
+      "default": "main"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "schedule"
+      ],
+      "default": "manual",
+      "description": "Modo de control: manual o por horario"
+    },
+    "manual_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Estado manual del delivery (activo/inactivo)"
+    },
+    "pickup_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Si la recogida en local est\u00e1 activa"
+    },
+    "schedule": {
+      "type": "object",
+      "description": "Horarios por d\u00eda de la semana",
+      "properties": {
+        "monday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tuesday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "wednesday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "thursday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "friday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "saturday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sunday": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string"
+                  },
+                  "close": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {},
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  },
+  "required": []
+}

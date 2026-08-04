@@ -1,0 +1,179 @@
+{
+  "name": "Order",
+  "type": "object",
+  "properties": {
+    "customer_name": {
+      "type": "string",
+      "description": "Nombre del cliente"
+    },
+    "customer_phone": {
+      "type": "string",
+      "description": "Tel\u00e9fono del cliente"
+    },
+    "customer_address": {
+      "type": "string",
+      "description": "Direcci\u00f3n de entrega"
+    },
+    "customer_notes": {
+      "type": "string",
+      "description": "Notas del pedido"
+    },
+    "pickup_time": {
+      "type": "string",
+      "description": "Hora estimada de recogida (para pedidos pickup)"
+    },
+    "items": {
+      "type": "array",
+      "description": "Productos del pedido",
+      "items": {
+        "type": "object",
+        "properties": {
+          "menu_item_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "price": {
+            "type": "number"
+          },
+          "removed_ingredients": {
+            "type": "array",
+            "description": "Ingredientes que el cliente ha pedido quitar",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "total": {
+      "type": "number",
+      "description": "Total del pedido incluyendo delivery y propina"
+    },
+    "subtotal": {
+      "type": "number",
+      "description": "Subtotal sin delivery"
+    },
+    "delivery_fee": {
+      "type": "number",
+      "description": "Coste del delivery"
+    },
+    "delivery_distance_km": {
+      "type": "number",
+      "description": "Distancia al cliente en km"
+    },
+    "tip": {
+      "type": "number",
+      "description": "Propina opcional del cliente",
+      "default": 0
+    },
+    "payment_method": {
+      "type": "string",
+      "enum": [
+        "tarjeta",
+        "efectivo",
+        "bizum",
+        "apple_pay",
+        "google_pay"
+      ],
+      "default": "tarjeta",
+      "description": "M\u00e9todo de pago"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "payment_pending",
+        "pending",
+        "confirmed",
+        "preparing",
+        "delivering",
+        "delivered",
+        "cancelled",
+        "refunded"
+      ],
+      "default": "payment_pending",
+      "description": "Estado del pedido"
+    },
+    "order_type": {
+      "type": "string",
+      "enum": [
+        "delivery",
+        "pickup"
+      ],
+      "default": "delivery",
+      "description": "Tipo de pedido"
+    },
+    "stripe_session_id": {
+      "type": "string",
+      "description": "ID de sesi\u00f3n de pago Stripe"
+    },
+    "stripe_payment_intent_id": {
+      "type": "string",
+      "description": "ID del PaymentIntent de Stripe"
+    },
+    "driver_lat": {
+      "type": "number",
+      "description": "Latitud actual del repartidor"
+    },
+    "driver_lng": {
+      "type": "number",
+      "description": "Longitud actual del repartidor"
+    },
+    "driver_updated_at": {
+      "type": "string",
+      "description": "Timestamp de \u00faltima actualizaci\u00f3n GPS"
+    },
+    "delivered_at": {
+      "type": "string",
+      "description": "Hora de entrega"
+    },
+    "refunded_at": {
+      "type": "string",
+      "description": "Hora del reembolso"
+    }
+  },
+  "required": [
+    "customer_name",
+    "customer_phone",
+    "items",
+    "total"
+  ],
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
