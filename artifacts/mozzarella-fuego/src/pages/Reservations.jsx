@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabase.jsx';
+import { db } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +30,7 @@ export default function Reservations() {
     e.preventDefault();
     setSubmitting(true);
 
-    await supabase.from('reservations').insert({
+    await db.insert('reservations', {
       customer_name: form.customer_name,
       customer_phone: form.customer_phone,
       guests: parseInt(form.guests),

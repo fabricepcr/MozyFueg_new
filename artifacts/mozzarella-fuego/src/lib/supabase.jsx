@@ -1,6 +1,46 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * supabase.jsx — safe no-op stub
+ * Supabase has been removed. This stub keeps legacy imports from crashing.
+ * The app now talks exclusively to the Replit Postgres backend via /api/*.
+ */
 
-const SUPABASE_URL = 'https://arkcpveujkddkxqekueg.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFya2NwdmV1amtkZGt4cWVrdWVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTI4MDgsImV4cCI6MjA5NDc4ODgwOH0.JJesMeU-h33uwlJfjcHQwczNjRe7VTJrGWjuU8S_GHk';
+const noopAsync = async () => ({ data: null, error: null });
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+function makeChain() {
+  const chain = {
+    select: () => chain,
+    insert: () => chain,
+    update: () => chain,
+    upsert: () => chain,
+    delete: () => chain,
+    eq: () => chain,
+    neq: () => chain,
+    in: () => chain,
+    order: () => chain,
+    limit: () => chain,
+    single: noopAsync,
+    maybeSingle: noopAsync,
+    then(fn) { return Promise.resolve({ data: null, error: null }).then(fn); },
+    catch(fn) { return Promise.resolve({ data: null, error: null }).catch(fn); },
+  };
+  return chain;
+}
+
+const noopChannel = {
+  on() { return this; },
+  subscribe() { return this; },
+};
+
+export const supabase = {
+  from: () => makeChain(),
+  channel: () => noopChannel,
+  removeChannel: () => {},
+  auth: {
+    getUser: noopAsync,
+    signInWithOtp: noopAsync,
+    signOut: noopAsync,
+    onAuthStateChange: () => ({
+      data: { subscription: { unsubscribe: () => {} } },
+    }),
+  },
+};

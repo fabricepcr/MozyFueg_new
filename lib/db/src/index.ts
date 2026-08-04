@@ -2,7 +2,10 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema";
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+
+// pg returns NUMERIC/DECIMAL columns as strings by default — parse as numbers.
+types.setTypeParser(1700, parseFloat); // NUMERIC / DECIMAL
 
 if (!process.env.DATABASE_URL) {
   throw new Error(

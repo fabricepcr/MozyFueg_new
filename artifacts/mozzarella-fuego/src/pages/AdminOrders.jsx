@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabase.jsx';
 import { db } from '@/lib/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, ExternalLink, RotateCcw, AlertTriangle, ArrowLeft, Copy, Trash2, Volume2, VolumeX } from 'lucide-react';
@@ -105,60 +104,16 @@ function AdminOrdersInner() {
     }
   }, [orders, isAuthed, isSuccess]);
 
-  // Realtime de Supabase con reconexión REAL.
+  // Orders refresh on visibility change / reconnect (replaces Supabase Realtime).
   useEffect(() => {
-    let channel = null;
-    let cancelled = false;
-    let retryTimer = null;
-
-    const handleChange = () => {
-      try {
-        queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
-      } catch (e) {
-        console.error('[realtime] invalidate error', e);
-      }
-    };
-
-    const cleanup = () => {
-      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-      if (channel) {
-        try { supabase.removeChannel(channel); } catch (_) {}
-        channel = null;
-      }
-    };
-
-    const subscribe = () => {
-      cleanup();
-      if (cancelled) return;
-      channel = supabase
-        .channel(`admin-orders-realtime-${Date.now()}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, handleChange)
-        .subscribe((status) => {
-          if (cancelled) return;
-          if (status === 'SUBSCRIBED') {
-            handleChange();
-          }
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            retryTimer = setTimeout(() => { if (!cancelled) subscribe(); }, 3000);
-          }
-        });
-    };
-
-    subscribe();
-
     const onWake = () => {
       if (document.visibilityState !== 'visible') return;
-      handleChange();  // recupera lo perdido mientras estaba de fondo
-      subscribe();     // canal nuevo: el anterior puede estar zombi
+      queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
     };
-
     document.addEventListener('visibilitychange', onWake);
     window.addEventListener('focus', onWake);
     window.addEventListener('online', onWake);
-
     return () => {
-      cancelled = true;
-      cleanup();
       document.removeEventListener('visibilitychange', onWake);
       window.removeEventListener('focus', onWake);
       window.removeEventListener('online', onWake);

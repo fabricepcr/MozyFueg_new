@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import { pool } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -8,16 +8,30 @@ const ADMIN_PASSWORD = "mozzarellayfuego123";
 const RESTAURANT_LAT = 41.4116;
 const RESTAURANT_LNG = 2.1751;
 const MAX_DELIVERY_KM = 8;
+const ALLOWED_TABLES = new Set([
+  "orders",
+  "menu_items",
+  "store_settings",
+  "delivery_settings",
+  "reservations",
+]);
 
-function getSupabase() {
-  const url =
-    (process.env["SUPABASE_URL"] ?? "")
-      .trim()
-      .replace(/\/$/, "")
-      .replace(/\/rest\/v1$/, "");
-  const key = (process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "").trim();
-  if (!url || !key) throw new Error("Missing Supabase credentials");
-  return createClient(url, key);
+/** Validate table name against allow-list */
+function vt(t: string): string {
+  if (!ALLOWED_TABLES.has(t)) throw new Error(`Table "${t}" not allowed`);
+  return t;
+}
+
+/** Sanitise a column name (alphanumeric + underscore only) */
+function sc(col: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(col))
+    throw new Error(`Invalid column: "${col}"`);
+  return col;
+}
+
+/** Serialize value for pg: objects/arrays become JSON strings */
+function ser(v: unknown): unknown {
+  return v !== null && typeof v === "object" ? JSON.stringify(v) : v;
 }
 
 function calcDeliveryFee(km: number): number {
@@ -31,25 +45,19 @@ function calcDeliveryFee(km: number): number {
 // ── Menu items ─────────────────────────────────────────────────────────────
 router.get("/menuItems", async (req, res) => {
   try {
-    const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from("menu_items")
-      .select("*")
-      .eq("available", true)
-      .order("sort_order", { ascending: true })
-      .limit(200);
-    if (error) throw error;
-    res.json({ data });
+    const { rows } = await pool.query(
+      `SELECT * FROM "menu_items" WHERE "available" = true ORDER BY "sort_order" ASC LIMIT 200`,
+    );
+    return res.json({ data: rows });
   } catch (err: any) {
     req.log.error({ err }, "menuItems error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
 // ── Stripe: create checkout session ────────────────────────────────────────
 router.post("/createCheckoutSession", async (req, res) => {
   try {
-    const supabase = getSupabase();
     const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
     const { orderData, successUrl, cancelUrl } = req.body;
 
@@ -70,31 +78,31 @@ router.post("/createCheckoutSession", async (req, res) => {
         ? parseFloat(orderData.total)
         : parseFloat((subtotal + delivery_fee + tip).toFixed(2));
 
-    const insertPayload = {
-      customer_name: String(orderData.customer_name || "Sin nombre").trim(),
-      customer_phone: String(
-        orderData.customer_phone || "Sin teléfono",
-      ).trim(),
-      customer_address: orderData.customer_address || "",
-      customer_notes: orderData.customer_notes || "",
-      pickup_time: orderData.pickup_time || "",
-      order_type: orderData.order_type || "delivery",
-      payment_method: "tarjeta",
-      status: "payment_pending",
-      items: orderData.items,
-      subtotal,
-      delivery_fee,
-      delivery_distance_km: parseFloat(orderData.delivery_distance_km) || null,
-      tip,
-      total,
-    };
-
-    const { data: order, error: dbError } = await supabase
-      .from("orders")
-      .insert(insertPayload)
-      .select()
-      .single();
-    if (dbError) throw dbError;
+    const { rows } = await pool.query(
+      `INSERT INTO "orders"
+         (customer_name, customer_phone, customer_address, customer_notes,
+          pickup_time, order_type, payment_method, status, items,
+          subtotal, delivery_fee, delivery_distance_km, tip, total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING *`,
+      [
+        String(orderData.customer_name || "Sin nombre").trim(),
+        String(orderData.customer_phone || "Sin teléfono").trim(),
+        orderData.customer_address || "",
+        orderData.customer_notes || "",
+        orderData.pickup_time || "",
+        orderData.order_type || "delivery",
+        "tarjeta",
+        "payment_pending",
+        JSON.stringify(orderData.items),
+        subtotal,
+        delivery_fee,
+        parseFloat(orderData.delivery_distance_km) || null,
+        tip,
+        total,
+      ],
+    );
+    const order = rows[0];
 
     const lineItems = orderData.items.map((item: any) => ({
       price_data: {
@@ -134,22 +142,26 @@ router.post("/createCheckoutSession", async (req, res) => {
         `${origin}/pedido-confirmado?orderId={CHECKOUT_SESSION_ID}&stripe=1`,
       cancel_url: cancelUrl || `${origin}/checkout`,
       payment_intent_data: {
-        description: `Pedido Mozzarella y Fuego - ${insertPayload.customer_name}`,
+        description: `Pedido Mozzarella y Fuego - ${order.customer_name}`,
       },
       metadata: {
         order_id: order.id,
-        customer_name: insertPayload.customer_name,
-        customer_phone: insertPayload.customer_phone,
-        order_type: insertPayload.order_type,
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+        order_type: order.order_type,
       },
     });
 
-    await supabase
-      .from("orders")
-      .update({ stripe_session_id: session.id })
-      .eq("id", order.id);
+    await pool.query(
+      `UPDATE "orders" SET stripe_session_id = $1 WHERE id = $2`,
+      [session.id, order.id],
+    );
 
-    return res.json({ url: session.url, sessionId: session.id, orderId: order.id });
+    return res.json({
+      url: session.url,
+      sessionId: session.id,
+      orderId: order.id,
+    });
   } catch (err: any) {
     req.log.error({ err }, "createCheckoutSession error");
     return res.status(500).json({ error: err.message });
@@ -159,7 +171,6 @@ router.post("/createCheckoutSession", async (req, res) => {
 // ── Create order (cash / on-pickup) ────────────────────────────────────────
 router.post("/createOrderDirect", async (req, res) => {
   try {
-    const supabase = getSupabase();
     const {
       items,
       total,
@@ -172,28 +183,28 @@ router.post("/createOrderDirect", async (req, res) => {
       pickup_time,
       payment_method,
     } = req.body;
-    const { data, error } = await supabase
-      .from("orders")
-      .insert([
-        {
-          customer_name,
-          customer_phone,
-          customer_address,
-          items,
-          total,
-          delivery_fee,
-          tip,
-          order_type,
-          pickup_time,
-          payment_method,
-          status: "pending",
-          subtotal: total - delivery_fee - tip,
-        },
-      ])
-      .select()
-      .single();
-    if (error) throw error;
-    return res.json({ success: true, orderId: data.id });
+    const { rows } = await pool.query(
+      `INSERT INTO "orders"
+         (customer_name, customer_phone, customer_address, items, total,
+          delivery_fee, tip, order_type, pickup_time, payment_method, status, subtotal)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING *`,
+      [
+        customer_name,
+        customer_phone,
+        customer_address,
+        JSON.stringify(items),
+        total,
+        delivery_fee,
+        tip,
+        order_type,
+        pickup_time,
+        payment_method,
+        "pending",
+        total - delivery_fee - tip,
+      ],
+    );
+    return res.json({ success: true, orderId: rows[0].id });
   } catch (err: any) {
     req.log.error({ err }, "createOrderDirect error");
     return res.status(500).json({ error: err.message });
@@ -253,16 +264,14 @@ router.post("/refundOrder", async (req, res) => {
     }
     if (!orderId) return res.status(400).json({ error: "orderId requerido" });
 
-    const supabase = getSupabase();
     const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
 
-    const { data: order, error: fetchError } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .single();
-    if (fetchError || !order)
-      return res.status(404).json({ error: "Pedido no encontrado" });
+    const { rows } = await pool.query(
+      `SELECT * FROM "orders" WHERE id = $1`,
+      [orderId],
+    );
+    const order = rows[0];
+    if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
 
     let refundId: string | null = null;
     if (order.stripe_session_id) {
@@ -282,10 +291,10 @@ router.post("/refundOrder", async (req, res) => {
       }
     }
 
-    await supabase
-      .from("orders")
-      .update({ status: "cancelled", refunded_at: new Date().toISOString() })
-      .eq("id", orderId);
+    await pool.query(
+      `UPDATE "orders" SET status = 'cancelled', refunded_at = NOW() WHERE id = $1`,
+      [orderId],
+    );
 
     return res.json({
       success: true,
@@ -299,7 +308,6 @@ router.post("/refundOrder", async (req, res) => {
 });
 
 // ── Stripe webhook ─────────────────────────────────────────────────────────
-// NOTE: raw body is configured in app.ts before express.json()
 router.post("/stripeWebhook", async (req, res) => {
   const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
   const sig = req.headers["stripe-signature"] as string;
@@ -313,15 +321,14 @@ router.post("/stripeWebhook", async (req, res) => {
       const session = event.data.object as Stripe.Checkout.Session;
       const orderId = session.metadata?.order_id;
       if (orderId) {
-        const supabase = getSupabase();
-        await supabase
-          .from("orders")
-          .update({
-            status: "confirmed",
-            stripe_session_id: session.id,
-            stripe_payment_intent_id: session.payment_intent,
-          })
-          .eq("id", orderId);
+        await pool.query(
+          `UPDATE "orders"
+           SET status = 'confirmed',
+               stripe_session_id = $1,
+               stripe_payment_intent_id = $2
+           WHERE id = $3`,
+          [session.id, session.payment_intent, orderId],
+        );
       }
     }
     return res.json({ received: true });
@@ -331,83 +338,134 @@ router.post("/stripeWebhook", async (req, res) => {
   }
 });
 
-// ── Supabase proxy (general CRUD for frontend db.js) ──────────────────────
+// ── Generic CRUD proxy (replaces Supabase proxy) ───────────────────────────
 router.post("/supabaseProxy", async (req, res) => {
   try {
-    const supabase = getSupabase();
-    const { action, table, data, query, id, updates, ids, upsert_column } =
-      req.body;
+    const {
+      action,
+      table: rawTable,
+      data,
+      query,
+      id,
+      updates,
+      ids,
+      upsert_column,
+    } = req.body;
+    const table = vt(rawTable);
 
     if (action === "insert") {
-      const { data: result, error } = await supabase
-        .from(table)
-        .insert(data)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const entries = Object.entries(
+        (data ?? {}) as Record<string, any>,
+      ).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const cols = entries.map(([c]) => `"${sc(c)}"`).join(", ");
+      const vals = entries.map(([, v]) => ser(v));
+      const phs = vals.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows } = await pool.query(
+        `INSERT INTO "${table}" (${cols}) VALUES (${phs}) RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "update") {
-      const { data: result, error } = await supabase
-        .from(table)
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const upd = (updates ?? {}) as Record<string, any>;
+      const entries = Object.entries(upd).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const vals = entries.map(([, v]) => ser(v));
+      const sets = entries
+        .map(([c], i) => `"${sc(c)}" = $${i + 1}`)
+        .join(", ");
+      vals.push(id);
+      const { rows } = await pool.query(
+        `UPDATE "${table}" SET ${sets} WHERE "id" = $${vals.length} RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "upsert") {
-      const upsertOpts = upsert_column
-        ? { onConflict: upsert_column }
-        : undefined;
-      const { data: result, error } = await supabase
-        .from(table)
-        .upsert(data, upsertOpts)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const entries = Object.entries(
+        (data ?? {}) as Record<string, any>,
+      ).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const cols = entries.map(([c]) => `"${sc(c)}"`).join(", ");
+      const vals = entries.map(([, v]) => ser(v));
+      const phs = vals.map((_, i) => `$${i + 1}`).join(", ");
+      const conflictCol = upsert_column ? `"${sc(upsert_column)}"` : '"id"';
+      const updateSets = entries
+        .filter(([c]) => c !== (upsert_column || "id"))
+        .map(([c]) => `"${sc(c)}" = EXCLUDED."${sc(c)}"`)
+        .join(", ");
+      const conflictClause = updateSets
+        ? `ON CONFLICT (${conflictCol}) DO UPDATE SET ${updateSets}`
+        : `ON CONFLICT (${conflictCol}) DO NOTHING`;
+      const { rows } = await pool.query(
+        `INSERT INTO "${table}" (${cols}) VALUES (${phs}) ${conflictClause} RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "select") {
-      let q = supabase.from(table).select("*");
-      if (query)
-        for (const [col, val] of Object.entries(query))
-          q = (q as any).eq(col, val);
-      const { data: result, error } = await (q as any)
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return res.json({ data: result });
+      const q = (query ?? {}) as Record<string, any>;
+      const qEntries = Object.entries(q);
+      const vals: any[] = [];
+      const where = qEntries.length
+        ? "WHERE " +
+          qEntries
+            .map(([c, v]) => {
+              vals.push(v);
+              return `"${sc(c)}" = $${vals.length}`;
+            })
+            .join(" AND ")
+        : "";
+      const { rows } = await pool.query(
+        `SELECT * FROM "${table}" ${where} ORDER BY "created_at" DESC LIMIT 200`,
+        vals,
+      );
+      return res.json({ data: rows });
     }
+
     if (action === "select_one") {
-      let q = supabase.from(table).select("*");
-      if (query)
-        for (const [col, val] of Object.entries(query))
-          q = (q as any).eq(col, val);
-      const { data: result, error } = await (q as any).limit(1).maybeSingle();
-      if (error?.code !== "PGRST116" && error) throw error;
-      return res.json({ data: result || null });
+      const q = (query ?? {}) as Record<string, any>;
+      const qEntries = Object.entries(q);
+      const vals: any[] = [];
+      const where = qEntries.length
+        ? "WHERE " +
+          qEntries
+            .map(([c, v]) => {
+              vals.push(v);
+              return `"${sc(c)}" = $${vals.length}`;
+            })
+            .join(" AND ")
+        : "";
+      const { rows } = await pool.query(
+        `SELECT * FROM "${table}" ${where} LIMIT 1`,
+        vals,
+      );
+      return res.json({ data: rows[0] ?? null });
     }
+
     if (action === "delete" || action === "delete_one") {
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) throw error;
+      await pool.query(`DELETE FROM "${table}" WHERE "id" = $1`, [id]);
       return res.json({ success: true });
     }
+
     if (action === "delete_many") {
       if (!ids?.length) return res.json({ success: true });
-      const { error } = await supabase.from(table).delete().in("id", ids);
-      if (error) throw error;
+      await pool.query(
+        `DELETE FROM "${table}" WHERE "id" = ANY($1::uuid[])`,
+        [ids],
+      );
       return res.json({ success: true });
     }
+
     if (action === "delete_all") {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-      if (error) throw error;
+      await pool.query(`DELETE FROM "${table}"`);
       return res.json({ success: true });
     }
+
     return res.status(400).json({ error: "Unknown action" });
   } catch (err: any) {
     req.log.error({ err }, "supabaseProxy error");
@@ -418,35 +476,44 @@ router.post("/supabaseProxy", async (req, res) => {
 // ── Admin settings ─────────────────────────────────────────────────────────
 router.post("/adminSettings", async (req, res) => {
   try {
-    const supabase = getSupabase();
-    const { action, password, key, value, table, data, query, id, updates, ids, upsert_column } = req.body;
+    const {
+      action,
+      password,
+      key,
+      value,
+      table: rawTable,
+      data,
+      query,
+      id,
+      updates,
+      ids,
+      upsert_column,
+    } = req.body;
 
-    // ── Public read (no auth needed) ──────────────────────────────────────
+    // ── Public reads (no auth required) ─────────────────────────────────────
     if (action === "getPublicSettings") {
-      const [{ data: storeArr }, { data: deliveryArr }] = await Promise.all([
-        supabase.from("store_settings").select("store_open").limit(1),
-        supabase
-          .from("delivery_settings")
-          .select("manual_active, pickup_active")
-          .limit(1),
+      const [storeRes, deliveryRes] = await Promise.all([
+        pool.query(
+          `SELECT "store_open" FROM "store_settings" LIMIT 1`,
+        ),
+        pool.query(
+          `SELECT "manual_active", "pickup_active" FROM "delivery_settings" LIMIT 1`,
+        ),
       ]);
-      const storeOpen = storeArr?.[0]?.store_open !== false;
-      const deliveryActive = deliveryArr?.[0]?.manual_active !== false;
-      const pickupActive = deliveryArr?.[0]?.pickup_active !== false;
+      const storeOpen = storeRes.rows[0]?.store_open !== false;
+      const deliveryActive = deliveryRes.rows[0]?.manual_active !== false;
+      const pickupActive = deliveryRes.rows[0]?.pickup_active !== false;
       return res.json({ data: { storeOpen, deliveryActive, pickupActive } });
     }
 
     if (action === "getDeliverySettings") {
-      // Read current delivery settings row (no auth needed for read)
-      const { data: row } = await supabase
-        .from("delivery_settings")
-        .select("*")
-        .limit(1)
-        .maybeSingle();
-      return res.json({ data: row || null });
+      const { rows } = await pool.query(
+        `SELECT * FROM "delivery_settings" LIMIT 1`,
+      );
+      return res.json({ data: rows[0] ?? null });
     }
 
-    // ── Auth required for mutations ──────────────────────────────────────
+    // ── Auth required for all mutations ─────────────────────────────────────
     if (password !== ADMIN_PASSWORD) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -454,45 +521,24 @@ router.post("/adminSettings", async (req, res) => {
     if (action === "updateSetting") {
       const val = value === true || value === "true";
       if (key === "store_open") {
-        const { data: existing } = await supabase
-          .from("store_settings")
-          .select("id")
-          .limit(1);
-        const existingId = existing?.[0]?.id;
-        if (existingId) {
-          await supabase
-            .from("store_settings")
-            .update({ store_open: val })
-            .eq("id", existingId);
-        } else {
-          await supabase
-            .from("store_settings")
-            .insert({ store_open: val, singleton_key: "main" });
-        }
+        await pool.query(
+          `INSERT INTO "store_settings" (store_open, singleton_key, updated_at)
+           VALUES ($1, 'main', NOW())
+           ON CONFLICT (singleton_key)
+           DO UPDATE SET store_open = EXCLUDED.store_open, updated_at = NOW()`,
+          [val],
+        );
         return res.json({ data: { key, value: val } });
       }
       if (key === "delivery_active" || key === "pickup_active") {
-        const { data: existing } = await supabase
-          .from("delivery_settings")
-          .select("id, manual_active, pickup_active")
-          .limit(1);
-        const row = existing?.[0];
-        const updatesMap: any = {};
-        if (key === "delivery_active") updatesMap.manual_active = val;
-        if (key === "pickup_active") updatesMap.pickup_active = val;
-        if (row?.id) {
-          await supabase
-            .from("delivery_settings")
-            .update(updatesMap)
-            .eq("id", row.id);
-        } else {
-          await supabase.from("delivery_settings").insert({
-            mode: "manual",
-            manual_active: key === "delivery_active" ? val : true,
-            pickup_active: key === "pickup_active" ? val : true,
-            singleton_key: "main",
-          });
-        }
+        const col = key === "delivery_active" ? "manual_active" : "pickup_active";
+        await pool.query(
+          `INSERT INTO "delivery_settings" ("${col}", singleton_key, updated_at)
+           VALUES ($1, 'main', NOW())
+           ON CONFLICT (singleton_key)
+           DO UPDATE SET "${col}" = EXCLUDED."${col}", updated_at = NOW()`,
+          [val],
+        );
         return res.json({ data: { key, value: val } });
       }
       return res.status(400).json({ error: "Unknown key" });
@@ -503,133 +549,166 @@ router.post("/adminSettings", async (req, res) => {
         value?.delivery_active === true || value?.delivery_active === "true";
       const pickupVal =
         value?.pickup_active === true || value?.pickup_active === "true";
-      const { data: existing } = await supabase
-        .from("delivery_settings")
-        .select("id")
-        .limit(1);
-      const row = existing?.[0];
-      if (row?.id) {
-        const { error: e1 } = await supabase
-          .from("delivery_settings")
-          .update({ manual_active: deliveryVal, pickup_active: pickupVal })
-          .eq("id", row.id);
-        if (e1) {
-          await supabase
-            .from("delivery_settings")
-            .update({ manual_active: deliveryVal })
-            .eq("id", row.id);
-        }
-      } else {
-        await supabase.from("delivery_settings").insert({
-          mode: "manual",
-          singleton_key: "main",
-          manual_active: deliveryVal,
-          pickup_active: pickupVal,
-        });
-      }
+      await pool.query(
+        `INSERT INTO "delivery_settings" (manual_active, pickup_active, singleton_key, updated_at)
+         VALUES ($1, $2, 'main', NOW())
+         ON CONFLICT (singleton_key)
+         DO UPDATE SET manual_active = EXCLUDED.manual_active,
+                       pickup_active = EXCLUDED.pickup_active,
+                       updated_at = NOW()`,
+        [deliveryVal, pickupVal],
+      );
       return res.json({
         data: { delivery_active: deliveryVal, pickup_active: pickupVal },
       });
     }
 
-    if (action === "saveDeliverySettings") {
-      const { data: existing } = await supabase
-        .from("delivery_settings")
-        .select("id")
-        .limit(1);
-      const row = existing?.[0];
-      const settingsData = data || value;
-      if (row?.id) {
-        const { data: result, error } = await supabase
-          .from("delivery_settings")
-          .update(settingsData)
-          .eq("id", row.id)
-          .select()
-          .single();
-        if (error) throw error;
-        return res.json({ data: result });
-      } else {
-        const { data: result, error } = await supabase
-          .from("delivery_settings")
-          .insert({ ...settingsData, singleton_key: "main" })
-          .select()
-          .single();
-        if (error) throw error;
-        return res.json({ data: result });
-      }
+    // saveDeliverySettings / updateDeliverySettings are aliases
+    if (
+      action === "saveDeliverySettings" ||
+      action === "updateDeliverySettings"
+    ) {
+      const settingsData = (data || value) as Record<string, any>;
+      const entries = Object.entries(settingsData).filter(
+        ([c, v]) =>
+          v !== undefined &&
+          c !== "id" &&
+          c !== "singleton_key" &&
+          c !== "created_at",
+      );
+      const cols = entries.map(([c]) => `"${sc(c)}"`).join(", ");
+      const vals = entries.map(([, v]) => ser(v));
+      const phs = vals.map((_, i) => `$${i + 1}`).join(", ");
+      const updateSets = entries
+        .map(([c]) => `"${sc(c)}" = EXCLUDED."${sc(c)}"`)
+        .join(", ");
+      const { rows } = await pool.query(
+        `INSERT INTO "delivery_settings" (${cols}, singleton_key, updated_at)
+         VALUES (${phs}, 'main', NOW())
+         ON CONFLICT (singleton_key)
+         DO UPDATE SET ${updateSets}, updated_at = NOW()
+         RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
 
-    // ── Generic table CRUD ────────────────────────────────────────────────
-    if (!table) {
+    // ── Generic table CRUD (authenticated) ──────────────────────────────────
+    if (!rawTable) {
       return res.status(400).json({ error: "Unknown action" });
     }
+    const table = vt(rawTable);
 
     if (action === "insert") {
-      const { data: result, error } = await supabase
-        .from(table)
-        .insert(data)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const entries = Object.entries(
+        (data ?? {}) as Record<string, any>,
+      ).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const cols = entries.map(([c]) => `"${sc(c)}"`).join(", ");
+      const vals = entries.map(([, v]) => ser(v));
+      const phs = vals.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows } = await pool.query(
+        `INSERT INTO "${table}" (${cols}) VALUES (${phs}) RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "update") {
-      const { data: result, error } = await supabase
-        .from(table)
-        .update(updates ?? data)
-        .eq("id", id)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const upd = (updates ?? data ?? {}) as Record<string, any>;
+      const entries = Object.entries(upd).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const vals = entries.map(([, v]) => ser(v));
+      const sets = entries
+        .map(([c], i) => `"${sc(c)}" = $${i + 1}`)
+        .join(", ");
+      vals.push(id);
+      const { rows } = await pool.query(
+        `UPDATE "${table}" SET ${sets} WHERE "id" = $${vals.length} RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "upsert") {
-      const upsertOpts = upsert_column ? { onConflict: upsert_column } : undefined;
-      const { data: result, error } = await supabase
-        .from(table)
-        .upsert(data, upsertOpts)
-        .select()
-        .single();
-      if (error) throw error;
-      return res.json({ data: result });
+      const entries = Object.entries(
+        (data ?? {}) as Record<string, any>,
+      ).filter(([, v]) => v !== undefined);
+      if (!entries.length) return res.json({ data: {} });
+      const cols = entries.map(([c]) => `"${sc(c)}"`).join(", ");
+      const vals = entries.map(([, v]) => ser(v));
+      const phs = vals.map((_, i) => `$${i + 1}`).join(", ");
+      const conflictCol = upsert_column ? `"${sc(upsert_column)}"` : '"id"';
+      const updateSets = entries
+        .filter(([c]) => c !== (upsert_column || "id"))
+        .map(([c]) => `"${sc(c)}" = EXCLUDED."${sc(c)}"`)
+        .join(", ");
+      const conflictClause = updateSets
+        ? `ON CONFLICT (${conflictCol}) DO UPDATE SET ${updateSets}`
+        : `ON CONFLICT (${conflictCol}) DO NOTHING`;
+      const { rows } = await pool.query(
+        `INSERT INTO "${table}" (${cols}) VALUES (${phs}) ${conflictClause} RETURNING *`,
+        vals,
+      );
+      return res.json({ data: rows[0] });
     }
+
     if (action === "select") {
-      let q = supabase.from(table).select("*");
-      if (query)
-        for (const [col, val] of Object.entries(query))
-          q = (q as any).eq(col, val);
-      const { data: result, error } = await (q as any)
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return res.json({ data: result });
+      const q = (query ?? {}) as Record<string, any>;
+      const qEntries = Object.entries(q);
+      const vals: any[] = [];
+      const where = qEntries.length
+        ? "WHERE " +
+          qEntries
+            .map(([c, v]) => {
+              vals.push(v);
+              return `"${sc(c)}" = $${vals.length}`;
+            })
+            .join(" AND ")
+        : "";
+      const { rows } = await pool.query(
+        `SELECT * FROM "${table}" ${where} ORDER BY "created_at" DESC LIMIT 200`,
+        vals,
+      );
+      return res.json({ data: rows });
     }
+
     if (action === "select_one") {
-      let q = supabase.from(table).select("*");
-      if (query)
-        for (const [col, val] of Object.entries(query))
-          q = (q as any).eq(col, val);
-      const { data: result, error } = await (q as any).limit(1).maybeSingle();
-      if (error?.code !== "PGRST116" && error) throw error;
-      return res.json({ data: result || null });
+      const q = (query ?? {}) as Record<string, any>;
+      const qEntries = Object.entries(q);
+      const vals: any[] = [];
+      const where = qEntries.length
+        ? "WHERE " +
+          qEntries
+            .map(([c, v]) => {
+              vals.push(v);
+              return `"${sc(c)}" = $${vals.length}`;
+            })
+            .join(" AND ")
+        : "";
+      const { rows } = await pool.query(
+        `SELECT * FROM "${table}" ${where} LIMIT 1`,
+        vals,
+      );
+      return res.json({ data: rows[0] ?? null });
     }
+
     if (action === "delete_one") {
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) throw error;
+      await pool.query(`DELETE FROM "${table}" WHERE "id" = $1`, [id]);
       return res.json({ success: true });
     }
+
     if (action === "delete_many") {
       if (!ids?.length) return res.json({ success: true });
-      const { error } = await supabase.from(table).delete().in("id", ids);
-      if (error) throw error;
+      await pool.query(
+        `DELETE FROM "${table}" WHERE "id" = ANY($1::uuid[])`,
+        [ids],
+      );
       return res.json({ success: true });
     }
+
     if (action === "delete_all") {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-      if (error) throw error;
+      await pool.query(`DELETE FROM "${table}"`);
       return res.json({ success: true });
     }
 

@@ -68,7 +68,6 @@
     "@hello-pangea/dnd": "^17.0.0",
     "@stripe/react-stripe-js": "^3.7.0",
     "@stripe/stripe-js": "^5.8.0",
-    "@supabase/supabase-js": "^2.49.4",
     "@types/leaflet": "^1.9.18",
     "@types/lodash": "^4.17.16",
     "canvas-confetti": "^1.9.4",

@@ -6,7 +6,8 @@ Online ordering and admin management platform for Mozzarella y Fuego, a Brazilia
 
 - Workflows are managed by Replit — use the workflow panel to start/stop services
 - `pnpm run typecheck` — full typecheck across all packages
-- Required secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `pnpm --filter @workspace/db run push` — push schema changes to Replit Postgres
+- Required secrets: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Supabase no longer needed)
 - Optional: `GOOGLE_MAPS_API_KEY` (used for real-time delivery distance/fee calculation)
 
 ## Stack
@@ -14,7 +15,7 @@ Online ordering and admin management platform for Mozzarella y Fuego, a Brazilia
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React 18 + Vite + Tailwind CSS v3 + react-router-dom v6
 - API: Express 5 (`artifacts/api-server/`)
-- Database: Supabase (Postgres) — accessed via `@supabase/supabase-js` from the API server
+- Database: Replit Postgres (`DATABASE_URL`) — Drizzle ORM schema in `lib/db/`, raw SQL via `pool` in API routes
 - Payments: Stripe Checkout + webhooks
 - Build: esbuild (API server), Vite (frontend)
 
@@ -34,11 +35,13 @@ Online ordering and admin management platform for Mozzarella y Fuego, a Brazilia
 
 ## Architecture decisions
 
-- **Supabase is the live database**: The app was ported from Base44 which used Supabase. All customer data (orders, menu items, reservations, settings) lives in Supabase. The Replit-provisioned Postgres (`lib/db/`) is scaffolded but unused — do not migrate unless explicitly requested.
-- **Admin auth is a hardcoded password** (`mozzarellayfuego123`): The original app had no real OAuth for admin. This is intentional — changing it is a follow-up, not part of this port.
-- **Base44 SDK fully removed**: `base44Client.js` is now a no-op stub; `app-params.js` is a stub. `AuthContext.jsx` was rewritten to fetch public settings from `/api/adminSettings` instead of the Base44 hosted SDK.
-- **All API routes in one file**: `artifacts/api-server/src/routes/api.ts` contains all ported routes from the original `server.js` + `adminSettings.js` Vercel functions. Stripe webhook raw-body parsing is configured in `app.ts` before `express.json()`.
-- **Frontend uses react-router-dom v6 BrowserRouter** (not wouter): The original app used react-router-dom; the scaffold used wouter. App.jsx (original) is loaded via App.tsx re-export to preserve the migration.
+- **Replit Postgres is the live database**: All data lives in the built-in Replit Postgres. Schema is in `lib/db/src/schema/index.ts` (5 tables). Push changes with `pnpm --filter @workspace/db run push`. The 49 real menu items were imported from the old Supabase project via `lib/db/import-from-supabase.mjs`.
+- **No Supabase**: `@supabase/supabase-js` is removed from all packages. `src/lib/supabase.jsx` is a safe no-op stub for legacy imports. `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are not needed.
+- **Generic CRUD proxy name preserved**: The `/api/supabaseProxy` endpoint name is kept so the frontend `db.js` works without changes. It now runs parameterized SQL against Replit Postgres.
+- **Admin auth is a hardcoded password**: The admin panel checks a known password server-side. Real auth is a future improvement.
+- **Admin orders panel uses polling only**: Supabase Realtime was removed. The panel polls every 8 seconds and also refreshes on tab focus/reconnect via visibility-change listeners.
+- **All API routes in one file**: `artifacts/api-server/src/routes/api.ts`. Stripe webhook raw-body parsing is in `app.ts` before `express.json()`.
+- **NUMERIC columns return as JS numbers**: `lib/db/src/index.ts` sets `pg.types.setTypeParser(1700, parseFloat)` so numeric columns arrive as numbers, not strings.
 
 ## Product
 
@@ -51,8 +54,9 @@ Online ordering and admin management platform for Mozzarella y Fuego, a Brazilia
 ## Gotchas
 
 - Stripe webhook route (`POST /api/stripeWebhook`) requires raw body — configured in `artifacts/api-server/src/app.ts` before `express.json()`.
-- `db.js` in the frontend calls `/api/supabaseProxy` (proxied by the Replit shared proxy to the api-server). Never use localhost directly in frontend code.
-- `react-leaflet` and `react-quill` have peer dep warnings against React 19 (workspace uses React 18 via catalog). They work at runtime but show warnings during install.
+- `db.js` in the frontend calls `/api/supabaseProxy` — endpoint name preserved for compatibility. Never use localhost in frontend code.
+- `singleton_key = 'main'` enforces one row for store_settings and delivery_settings via UNIQUE + ON CONFLICT upsert.
+- `react-leaflet` and `react-quill` have peer dep warnings against React 19. They work at runtime.
 - `tailwindcss-animate` is required by `tailwind.config.js` — it is installed in the frontend artifact's package.json.
 
 ## User preferences
