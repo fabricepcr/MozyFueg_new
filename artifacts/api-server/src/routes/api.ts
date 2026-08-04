@@ -149,10 +149,10 @@ router.post("/createCheckoutSession", async (req, res) => {
       .update({ stripe_session_id: session.id })
       .eq("id", order.id);
 
-    res.json({ url: session.url, sessionId: session.id, orderId: order.id });
+    return res.json({ url: session.url, sessionId: session.id, orderId: order.id });
   } catch (err: any) {
     req.log.error({ err }, "createCheckoutSession error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -193,10 +193,10 @@ router.post("/createOrderDirect", async (req, res) => {
       .select()
       .single();
     if (error) throw error;
-    res.json({ success: true, orderId: data.id });
+    return res.json({ success: true, orderId: data.id });
   } catch (err: any) {
     req.log.error({ err }, "createOrderDirect error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -240,7 +240,7 @@ router.post("/calcularEnvio", async (req, res) => {
     return res.json({ ok: true, km, fee: calcDeliveryFee(km), estimatedMin });
   } catch (err: any) {
     req.log.error({ err }, "calcularEnvio error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -294,7 +294,7 @@ router.post("/refundOrder", async (req, res) => {
     });
   } catch (err: any) {
     req.log.error({ err }, "refundOrder error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -324,10 +324,10 @@ router.post("/stripeWebhook", async (req, res) => {
           .eq("id", orderId);
       }
     }
-    res.json({ received: true });
+    return res.json({ received: true });
   } catch (err: any) {
     req.log.error({ err }, "Stripe webhook error");
-    res.status(400).json({ error: err.message });
+    return res.status(400).json({ error: err.message });
   }
 });
 
@@ -408,10 +408,10 @@ router.post("/supabaseProxy", async (req, res) => {
       if (error) throw error;
       return res.json({ success: true });
     }
-    res.status(400).json({ error: "Unknown action" });
+    return res.status(400).json({ error: "Unknown action" });
   } catch (err: any) {
     req.log.error({ err }, "supabaseProxy error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -636,7 +636,7 @@ router.post("/adminSettings", async (req, res) => {
     return res.status(400).json({ error: "Unknown action" });
   } catch (err: any) {
     req.log.error({ err }, "adminSettings error");
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -1,0 +1,2 @@
+- [Supabase-not-Replit-DB](supabase-live-db.md) — app uses Supabase as its real DB; Replit Postgres (lib/db/) is scaffolded but unused — do not migrate without explicit ask.
+- [Base44-auth-stub](base44-auth-stub.md) — base44Client.js and app-params.js are no-op stubs; admin auth uses hardcoded password; AuthContext.jsx fetches public settings from /api/adminSettings.
