@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '@/lib/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, ExternalLink, RotateCcw, AlertTriangle, ArrowLeft, Copy, Trash2, Volume2, VolumeX } from 'lucide-react';
+import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, ExternalLink, RotateCcw, AlertTriangle, ArrowLeft, Copy, Trash2, Volume2, VolumeX, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AdminLogin from '@/components/admin/AdminLogin';
@@ -12,8 +12,10 @@ import StorePanel from '@/components/admin/StorePanel';
 import PizzasPanel from '@/components/admin/PizzasPanel';
 import DeliveryGuysPanel from '@/components/admin/DeliveryGuysPanel';
 import AdminMenu from '@/components/admin/AdminMenu';
+import PrintConfig, { loadPrintConfig, triggerPrint } from '@/components/admin/PrintConfig';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { initSound, startSoundLoop, stopSoundLoop, unlockSound, testSound, onSoundStateChange } from '@/lib/orderSound';
+import { useToast } from '@/components/ui/use-toast';
 
 
 const STATUS_CONFIG = {
@@ -40,11 +42,37 @@ const TABS = [
   { key: 'repartidores', label: '🏍️ Repartidores' },
 ];
 
-const DRIVER_ASSIGN_STATUSES = ['confirmed', 'preparing', 'delivering'];
+// Include 'pending' so staff can pre-assign a driver before confirming, making
+// the confirm → WhatsApp flow work atomically in one status change.
+const DRIVER_ASSIGN_STATUSES = ['pending', 'confirmed', 'preparing', 'delivering'];
+
+async function notifyDriverWhatsApp(order, driverId) {
+  if (!driverId) return { ok: false, error: 'Sin repartidor asignado' };
+  try {
+    // Fetch driver details
+    const driverRes = await fetch('/api/admin/deliveryGuys', { credentials: 'include' });
+    const driverJson = await driverRes.json();
+    const driver = (driverJson.data || []).find(d => d.id === driverId);
+    if (!driver) return { ok: false, error: 'Repartidor no encontrado' };
+
+    const res = await fetch('/api/admin/notifyDriver', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ order, driver }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) return { ok: false, error: data.error || 'Error de WhatsApp' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Error de conexión' };
+  }
+}
 
 function AdminOrdersInner() {
   const [isAuthed, setIsAuthed] = useState(() => sessionStorage.getItem('admin_auth') === '1');
   const [activeTab, setActiveTab] = useState('pedidos');
+  const { toast } = useToast();
 
   // Verify the server session is still valid on mount (e.g. after page reload or expiry).
   useEffect(() => {
@@ -159,8 +187,82 @@ function AdminOrdersInner() {
       setRefundConfirmId(orderId);
       return;
     }
+
+    // ── Confirmation: unified flow that updates status + print + WhatsApp ──
+    if (newStatus === 'confirmed') {
+      const cfg = loadPrintConfig();
+      const parts = [];
+
+      // ── Browser-side print FIRST (USB / dialog modes require a live user gesture)
+      // Trigger before any async server call so the activation context is preserved.
+      if (cfg.auto_print === true && cfg.print_mode !== 'network') {
+        const order = orders.find(o => o.id === orderId);
+        if (order) {
+          const printResult = await triggerPrint(order, cfg);
+          parts.push(printResult.ok ? '🖨️ Ticket enviado' : `🖨️ Error: ${printResult.error}`);
+        }
+      }
+
+      // ── Server call: persists status + runs network print + sends WhatsApp ──
+      // Network print config is sent only when auto_print is explicitly enabled.
+      const printerConfig = cfg.print_mode === 'network' && cfg.auto_print === true
+        ? { mode: 'network', ip: cfg.network_ip, port: cfg.network_port || '9100', widthMm: cfg.printer_id === 'generic-58' ? 58 : 80 }
+        : null;
+
+      const body = {
+        ...(printerConfig ? { printer_config: printerConfig } : {}),
+        whatsapp: cfg.whatsapp_enabled === true,
+      };
+
+      const res = await fetch(`/api/admin/orders/${orderId}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+
+      if (!res.ok) {
+        toast({ title: '❌ Error al confirmar', description: data.error, variant: 'destructive', duration: 5000 });
+        return;
+      }
+
+      if (data.print) {
+        parts.push(data.print.ok ? '🖨️ Ticket enviado' : `🖨️ Error impresora: ${data.print.error}`);
+      }
+      if (data.whatsapp) {
+        parts.push(data.whatsapp.ok ? '💬 WhatsApp enviado' : `💬 Error WA: ${data.whatsapp.error}`);
+      }
+
+      if (parts.length > 0) {
+        const allOk = parts.every(p => !p.includes('Error'));
+        toast({
+          title: allOk ? '✅ Pedido confirmado' : '⚠️ Pedido confirmado (con avisos)',
+          description: parts.join(' · '),
+          duration: 6000,
+          variant: allOk ? 'default' : 'destructive',
+        });
+      } else {
+        toast({ title: '✅ Pedido confirmado', duration: 3000 });
+      }
+      return;
+    }
+
+    // ── Other status changes ────────────────────────────────────────────────
     await db.update('orders', orderId, { status: newStatus });
     queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+  };
+
+  const handleReprintOrder = async (order) => {
+    const cfg = loadPrintConfig();
+    const result = await triggerPrint(order, cfg);
+    toast({
+      title: result.ok ? '✅ Ticket reenviado' : '⚠️ Error al reimprimir',
+      description: result.message || result.error,
+      duration: 4000,
+      variant: result.ok ? 'default' : 'destructive',
+    });
   };
 
   const handleAssignDriver = async (orderId, driverId) => {
@@ -284,7 +386,17 @@ function AdminOrdersInner() {
 
         {activeTab === 'pizzas' && <PizzasPanel />}
 
-        {activeTab === 'tienda' && <StorePanel />}
+        {activeTab === 'tienda' && (
+          <div className="space-y-8">
+            <StorePanel />
+            <div>
+              <h2 className="font-heading font-semibold text-lg mb-4 flex items-center gap-2">
+                🖨️ Impresora y notificaciones
+              </h2>
+              <PrintConfig />
+            </div>
+          </div>
+        )}
 
         {activeTab === 'repartidores' && <DeliveryGuysPanel />}
 
@@ -414,6 +526,15 @@ function AdminOrdersInner() {
                           {copiedId === order.id ? <><CheckCircle className="w-3.5 h-3.5 text-green-600" /><span className="text-green-600">¡Copiado!</span></> : <><Copy className="w-3.5 h-3.5" />Copiar enlace</>}
                         </button>
                       </div>
+                      {/* Reimprimir — persistent recovery button visible on all active orders */}
+                      <button
+                        onClick={() => handleReprintOrder(order)}
+                        className="w-full mt-2 flex items-center justify-center gap-1.5 text-xs bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2 hover:bg-gray-100 transition-colors font-medium"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        Reimprimir ticket
+                      </button>
+
                       <ThermerShare order={order} />
                     </div>
                   );

@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import * as net from "net";
 import { pool } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
 
@@ -878,6 +879,316 @@ router.delete('/admin/menuItems/:id', async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     req.log.error({ err }, 'admin/menuItems DELETE error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ESC/POS byte generator (backend) ──────────────────────────────────────
+const ESC_POS_INIT   = [0x1b, 0x40];
+const ESC_CENTER     = [0x1b, 0x61, 0x01];
+const ESC_LEFT       = [0x1b, 0x61, 0x00];
+const ESC_BOLD_ON    = [0x1b, 0x45, 0x01];
+const ESC_BOLD_OFF   = [0x1b, 0x45, 0x00];
+const GS_DOUBLE      = [0x1d, 0x21, 0x11];
+const GS_NORMAL      = [0x1d, 0x21, 0x00];
+const GS_DHEIGHT     = [0x1d, 0x21, 0x10];
+const GS_CUT         = [0x1d, 0x56, 0x00];
+
+const PAYMENT_ES: Record<string, string> = {
+  efectivo: 'EFECTIVO', tarjeta: 'TARJETA', bizum: 'BIZUM', datafono: 'DATAFONO',
+};
+
+function buildEscPosBuffer(order: any, widthMm = 80): Buffer {
+  const W = widthMm === 58 ? 32 : 42;
+  const bytes: number[] = [];
+
+  const push  = (...vals: number[]) => bytes.push(...vals);
+  const pushS = (s: string) => { for (const c of s) bytes.push(c.charCodeAt(0) & 0xff); };
+  const pushL = (s = '') => { pushS(s); push(0x0a); };
+
+  const orderId = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
+  const dateStr = new Date(order.created_at).toLocaleString('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const isDelivery = order.order_type !== 'pickup';
+
+  push(...ESC_POS_INIT);
+  push(...ESC_CENTER);
+  push(...GS_DOUBLE);  pushL('MOZZARELLA Y FUEGO');
+  push(...GS_NORMAL);  pushL('Pizzeria - Barcelona');
+  push(...ESC_LEFT);   pushL('-'.repeat(W));
+
+  push(...ESC_CENTER, ...ESC_BOLD_ON);
+  pushL(`PEDIDO #${orderId}`);
+  push(...ESC_BOLD_OFF);
+  pushL(dateStr);
+  pushL(isDelivery ? '** DOMICILIO **' : '** RECOGIDA LOCAL **');
+  push(...ESC_LEFT);   pushL('-'.repeat(W));
+
+  push(...ESC_BOLD_ON); pushL(order.customer_name || '-'); push(...ESC_BOLD_OFF);
+  pushL(`Tel: ${order.customer_phone || '-'}`);
+  if (isDelivery && order.customer_address) pushL(order.customer_address);
+  if (!isDelivery && order.pickup_time)     pushL(`Recogida: ${order.pickup_time}`);
+  if (order.customer_notes) { pushL('-'.repeat(W)); pushL(`Notas: ${order.customer_notes}`); }
+
+  pushL('-'.repeat(W)); pushL('ARTICULOS'); pushL('-'.repeat(W));
+
+  for (const item of (order.items || []) as any[]) {
+    const name  = `${item.quantity}x ${item.name}`;
+    const price = `${(item.price * item.quantity).toFixed(2)}E`;
+    const gap   = W - name.length - price.length;
+    gap > 0 ? pushL(name + ' '.repeat(gap) + price) : (pushL(name), pushL(' '.repeat(Math.max(0, W - price.length)) + price));
+    for (const r of item.removed_ingredients || []) pushL(`  - SIN ${String(r).toUpperCase()}`);
+    for (const e of item.extras || [])               pushL(`  + ${e}`);
+  }
+
+  pushL('='.repeat(W));
+  if (order.delivery_fee > 0) { const v = `${order.delivery_fee.toFixed(2)} EUR`; pushL('Envio:' + ' '.repeat(Math.max(1, W - 6 - v.length)) + v); }
+  if (order.tip > 0)          { const v = `+${order.tip.toFixed(2)} EUR`;          pushL('Propina:' + ' '.repeat(Math.max(1, W - 8 - v.length)) + v); }
+
+  push(...ESC_BOLD_ON, ...GS_DHEIGHT);
+  pushL(`TOTAL: ${(order.total || 0).toFixed(2)} EUR`);
+  push(...GS_NORMAL, ...ESC_BOLD_OFF);
+
+  pushL(`Pago: ${PAYMENT_ES[order.payment_method] || String(order.payment_method || '-').toUpperCase()}`);
+  pushL('-'.repeat(W));
+  push(...ESC_CENTER); pushL(''); pushL('Gracias por su pedido!'); pushL(''); pushL(''); pushL('');
+  push(...GS_CUT);
+
+  return Buffer.from(bytes);
+}
+
+// ── SSRF guard: only allow RFC-1918 LAN printer addresses ─────────────────
+const ALLOWED_PRINTER_PORTS = new Set([9100, 515, 631, 9101, 9102]);
+
+function validatePrinterTarget(ip: string, portRaw: string): { ok: true; port: number } | { ok: false; error: string } {
+  // Must be a bare IPv4 literal — reject hostnames that could resolve to internal services
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    return { ok: false, error: 'La IP de la impresora debe ser una dirección IPv4 (ej: 192.168.1.100)' };
+  }
+  const octets = ip.split('.').map(Number);
+  if (octets.some(o => o < 0 || o > 255)) {
+    return { ok: false, error: 'Dirección IPv4 no válida' };
+  }
+  const [a, b] = octets;
+  // Reject loopback, link-local, and anything that isn't a private LAN range
+  const isPrivate =
+    (a === 10) ||                       // 10.0.0.0/8
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+    (a === 192 && b === 168);            // 192.168.0.0/16
+  if (!isPrivate) {
+    return { ok: false, error: 'Solo se permiten impresoras en la red local (192.168.x.x, 10.x.x.x, 172.16-31.x.x)' };
+  }
+  const port = parseInt(portRaw, 10);
+  if (!ALLOWED_PRINTER_PORTS.has(port)) {
+    return {
+      ok: false,
+      error: `Puerto no permitido. Puertos válidos para impresoras térmicas: ${[...ALLOWED_PRINTER_PORTS].join(', ')}`,
+    };
+  }
+  return { ok: true, port };
+}
+
+// ── Admin: Confirm order (status + optional print + optional WhatsApp) ─────
+// Single authenticated server endpoint that atomically:
+//  1. Sets status = 'confirmed'
+//  2. Sends ESC/POS to network printer (if printer_config.mode === 'network')
+//  3. Sends WhatsApp to assigned driver via green-api (if whatsapp === true)
+// The status is always saved; print/WhatsApp failures are reported but don't
+// roll back the status change.
+router.post('/admin/orders/:id/confirm', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const orderId = req.params['id'];
+    if (!UUID_RE.test(orderId)) {
+      return res.status(400).json({ error: 'ID de pedido no válido' });
+    }
+
+    // 1. Update order status
+    const { rows: orderRows } = await pool.query(
+      `UPDATE "orders" SET status = 'confirmed' WHERE id = $1 RETURNING *`,
+      [orderId],
+    );
+    if (!orderRows.length) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+    const order = orderRows[0];
+
+    const result: Record<string, any> = { order };
+
+    // 2. Network print (optional)
+    const printerCfg = req.body.printer_config as any;
+    if (printerCfg?.mode === 'network') {
+      const ipRaw   = String(printerCfg.ip || '');
+      const portRaw = String(printerCfg.port || '9100');
+      const validation = validatePrinterTarget(ipRaw, portRaw);
+      if (!validation.ok) {
+        result.print = { ok: false, error: validation.error };
+      } else {
+        const widthMm = Number(printerCfg.widthMm) === 58 ? 58 : 80;
+        const buf = buildEscPosBuffer(order, widthMm);
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const socket = net.createConnection({ host: ipRaw, port: validation.port }, () => {
+              socket.write(buf, (err) => { if (err) { socket.destroy(); reject(err); return; } socket.end(); resolve(); });
+            });
+            socket.on('error', reject);
+            socket.setTimeout(5000, () => { socket.destroy(); reject(new Error('Timeout de conexión con la impresora')); });
+          });
+          result.print = { ok: true, bytes: buf.length };
+        } catch (printErr: any) {
+          result.print = { ok: false, error: printErr.message };
+        }
+      }
+    }
+
+    // 3. WhatsApp notification (optional)
+    if (req.body.whatsapp === true && order.assigned_driver_id) {
+      const instanceId = process.env['GREEN_API_INSTANCE_ID'];
+      const token      = process.env['GREEN_API_TOKEN'];
+      if (!instanceId || !token) {
+        result.whatsapp = { ok: false, error: 'GREEN_API no configurado' };
+      } else {
+        try {
+          const { rows: driverRows } = await pool.query(
+            `SELECT * FROM "delivery_guys" WHERE id = $1`,
+            [order.assigned_driver_id],
+          );
+          const driver = driverRows[0];
+          if (!driver) {
+            result.whatsapp = { ok: false, error: 'Repartidor no encontrado' };
+          } else {
+            let phone = String(driver.phone).replace(/\D/g, '');
+            if (phone.startsWith('6') || phone.startsWith('7') || phone.startsWith('9')) phone = '34' + phone;
+            const chatId = `${phone}@c.us`;
+            const oId    = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
+            const isDelivery = order.order_type !== 'pickup';
+            const itemsList  = ((order.items || []) as any[]).map((i: any) => `• ${i.quantity}x ${i.name}`).join('\n');
+            const lines = [
+              `🍕 *Nuevo pedido #${oId}*`, '',
+              `👤 *Cliente:* ${order.customer_name}`,
+              `📞 ${order.customer_phone}`,
+              isDelivery && order.customer_address ? `📍 ${order.customer_address}` : null,
+              order.customer_notes ? `📝 ${order.customer_notes}` : null,
+              '', '*Artículos:*', itemsList, '',
+              `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
+            ].filter((l): l is string => l !== null && l !== undefined);
+            const message = lines.join('\n');
+            const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+            // Bound to 8 s so a stalled Green API never hangs the confirm response
+            const gRes  = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chatId, message }),
+              signal: AbortSignal.timeout(8000),
+            });
+            const gData = (await gRes.json()) as any;
+            result.whatsapp = gRes.ok && !gData.error
+              ? { ok: true, idMessage: gData.idMessage }
+              : { ok: false, error: gData.error || 'Error de green-api' };
+          }
+        } catch (waErr: any) {
+          result.whatsapp = { ok: false, error: waErr.message };
+        }
+      }
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/orders/confirm error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Network print (TCP → ESC/POS) ──────────────────────────────────
+router.post('/admin/print', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { order, ip, port: portRaw } = req.body;
+    if (!order || !ip || !portRaw) {
+      return res.status(400).json({ error: 'order, ip y port son requeridos' });
+    }
+    const validation = validatePrinterTarget(String(ip), String(portRaw));
+    if (!validation.ok) {
+      return res.status(400).json({ error: validation.error });
+    }
+    const widthMm = Number(req.body.widthMm) === 58 ? 58 : 80;
+    const buf = buildEscPosBuffer(order, widthMm);
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.createConnection({ host: ip, port: validation.port }, () => {
+        socket.write(buf, (err) => {
+          if (err) { socket.destroy(); reject(err); return; }
+          socket.end();
+          resolve();
+        });
+      });
+      socket.on('error', reject);
+      socket.setTimeout(5000, () => { socket.destroy(); reject(new Error('Timeout de conexión con la impresora')); });
+    });
+    return res.json({ success: true, bytes: buf.length });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/print error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: WhatsApp notify driver via green-api ────────────────────────────
+router.post('/admin/notifyDriver', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { order, driver } = req.body;
+
+    const instanceId = process.env['GREEN_API_INSTANCE_ID'];
+    const token      = process.env['GREEN_API_TOKEN'];
+    if (!instanceId || !token) {
+      return res.status(503).json({
+        error: 'GREEN_API no configurado. Añade GREEN_API_INSTANCE_ID y GREEN_API_TOKEN en los secrets del servidor.',
+      });
+    }
+    if (!order || !driver?.phone) {
+      return res.status(400).json({ error: 'order y driver.phone son requeridos' });
+    }
+
+    // Normalise Spanish phone → international format (chatId for green-api)
+    let phone = String(driver.phone).replace(/\D/g, '');
+    if (phone.startsWith('6') || phone.startsWith('7') || phone.startsWith('9')) phone = '34' + phone;
+    const chatId = `${phone}@c.us`;
+
+    const orderId  = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
+    const isDelivery = order.order_type !== 'pickup';
+    const itemsList = ((order.items || []) as any[])
+      .map((i: any) => `• ${i.quantity}x ${i.name}`)
+      .join('\n');
+
+    const lines = [
+      `🍕 *Nuevo pedido #${orderId}*`,
+      '',
+      `👤 *Cliente:* ${order.customer_name}`,
+      `📞 ${order.customer_phone}`,
+      isDelivery && order.customer_address ? `📍 ${order.customer_address}` : null,
+      order.customer_notes ? `📝 ${order.customer_notes}` : null,
+      '',
+      '*Artículos:*',
+      itemsList,
+      '',
+      `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
+    ].filter((l): l is string => l !== null && l !== undefined);
+
+    const message = lines.join('\n');
+    const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+
+    const gRes  = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ chatId, message }),
+    });
+    const gData = (await gRes.json()) as any;
+    if (!gRes.ok || gData.error) {
+      return res.status(502).json({ error: gData.error || 'Error de green-api', detail: gData });
+    }
+    return res.json({ success: true, idMessage: gData.idMessage });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/notifyDriver error');
     return res.status(500).json({ error: err.message });
   }
 });
