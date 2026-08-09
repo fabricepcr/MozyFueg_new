@@ -1,9 +1,12 @@
 import { Router, type IRouter } from "express";
 import { pool } from "@workspace/db";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
 
-const ADMIN_PASSWORD = "mozzarellayfuego123";
+// Read from environment so it can be rotated without redeploying.
+// Falls back to the default only when the env var is absent (e.g. local dev without secrets).
+const ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "mozzarellayfuego123";
 const RESTAURANT_LAT = 41.4116;
 const RESTAURANT_LNG = 2.1751;
 const MAX_DELIVERY_KM = 8;
@@ -159,7 +162,8 @@ router.post("/calcularEnvio", async (req, res) => {
 router.post("/refundOrder", async (req, res) => {
   try {
     const { orderId, adminPassword } = req.body;
-    if (adminPassword !== ADMIN_PASSWORD) {
+    const sessionOk = !!(req as any).session?.adminAuthed;
+    if (!sessionOk && adminPassword !== ADMIN_PASSWORD) {
       return res.status(403).json({ error: "No autorizado" });
     }
     if (!orderId) return res.status(400).json({ error: "orderId requerido" });
@@ -228,6 +232,22 @@ router.patch("/projeto/checklist/:id", async (req, res) => {
 });
 
 // ── Generic CRUD proxy (replaces Supabase proxy) ───────────────────────────
+// Tables where ALL writes (insert/update/delete) require an admin session.
+// Public tables like orders, reservations, and location_updates are intentionally
+// excluded so checkout, reservations, and driver-tracking continue to work without auth.
+const ADMIN_ONLY_TABLES = new Set([
+  "menu_items",
+  "store_settings",
+  "delivery_settings",
+  "toppings",
+  "delivery_guys",
+  "admin_settings",
+]);
+const WRITE_ACTIONS = new Set([
+  "insert", "update", "upsert",
+  "delete", "delete_one", "delete_many", "delete_all",
+]);
+
 router.post("/supabaseProxy", async (req, res) => {
   try {
     const {
@@ -241,6 +261,10 @@ router.post("/supabaseProxy", async (req, res) => {
       upsert_column,
     } = req.body;
     const table = vt(rawTable);
+
+    // Only restrict writes to admin-owned tables; public tables (orders, reservations,
+    // location_updates, etc.) must remain writable by unauthenticated clients.
+    if (WRITE_ACTIONS.has(action) && ADMIN_ONLY_TABLES.has(table) && !requireAdmin(req, res)) return;
 
     if (action === "insert") {
       const entries = Object.entries(
@@ -362,10 +386,33 @@ router.post("/supabaseProxy", async (req, res) => {
   }
 });
 
+// ── Admin session auth ──────────────────────────────────────────────────────
+router.post('/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Contraseña incorrecta' });
+  }
+  req.session.adminAuthed = true;
+  return res.json({ success: true });
+});
+
+router.get('/admin/me', (req, res) => {
+  return res.json({ authed: !!req.session.adminAuthed });
+});
+
+router.post('/admin/logout', (req, res) => {
+  req.session.destroy(() => {});
+  return res.json({ success: true });
+});
+
 // ── Admin: Delivery Guys CRUD ──────────────────────────────────────────────
 function requireAdmin(req: any, res: any): boolean {
-  const pw = req.body?.password || req.headers['x-admin-password'];
-  if (pw !== ADMIN_PASSWORD) {
+  // Primary auth: established server session (set by POST /api/admin/login).
+  // Backward compat: still accept x-admin-password header so existing integrations
+  // don't break while the session migration rolls out.
+  const sessionOk = !!req.session?.adminAuthed;
+  const pw = req.headers['x-admin-password'];
+  if (!sessionOk && pw !== ADMIN_PASSWORD) {
     res.status(401).json({ error: 'No autorizado' });
     return false;
   }
@@ -374,8 +421,7 @@ function requireAdmin(req: any, res: any): boolean {
 
 router.get('/admin/deliveryGuys', async (req, res) => {
   try {
-    const pw = req.headers['x-admin-password'];
-    if (pw !== ADMIN_PASSWORD) return res.status(401).json({ error: 'No autorizado' });
+    if (!requireAdmin(req, res)) return;
     const { rows } = await pool.query(
       `SELECT * FROM "delivery_guys" ORDER BY "name" ASC`,
     );
@@ -450,8 +496,7 @@ router.delete('/admin/deliveryGuys/:id', async (req, res) => {
 
 router.patch('/admin/orders/:id/assignDriver', async (req, res) => {
   try {
-    const pw = req.body?.password || req.headers['x-admin-password'];
-    if (pw !== ADMIN_PASSWORD) return res.status(401).json({ error: 'No autorizado' });
+    if (!requireAdmin(req, res)) return;
 
     const driverId: string | null = req.body.driver_id ?? null;
 
@@ -525,7 +570,8 @@ router.post("/adminSettings", async (req, res) => {
     }
 
     // ── Auth required for all mutations ─────────────────────────────────────
-    if (password !== ADMIN_PASSWORD) {
+    const sessionAuthed = !!(req as any).session?.adminAuthed;
+    if (!sessionAuthed && password !== ADMIN_PASSWORD) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
@@ -726,6 +772,112 @@ router.post("/adminSettings", async (req, res) => {
     return res.status(400).json({ error: "Unknown action" });
   } catch (err: any) {
     req.log.error({ err }, "adminSettings error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Image Upload (presigned URL) ────────────────────────────────────
+const objectStorageService = new ObjectStorageService();
+
+router.post('/admin/uploadImage', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { name, contentType } = req.body;
+    if (!name || !contentType) {
+      return res.status(400).json({ error: 'name y contentType son requeridos' });
+    }
+    const { uploadURL, objectPath } = await objectStorageService.getObjectEntityUploadURLWithPath();
+    // The serving URL clients store in menu_items.image_url
+    const imageUrl = `/api/storage${objectPath}`;
+    return res.json({ uploadURL, objectPath, imageUrl });
+  } catch (err: any) {
+    req.log.error({ err }, 'uploadImage error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Publish uploaded image (set ACL to public) ─────────────────────
+router.post('/admin/publishImage', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { objectPath } = req.body;
+    if (!objectPath || !objectPath.startsWith('/objects/')) {
+      return res.status(400).json({ error: 'objectPath inválido' });
+    }
+    await objectStorageService.trySetObjectEntityAclPolicy(objectPath, {
+      owner: 'admin',
+      visibility: 'public',
+    });
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, 'publishImage error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Menu Items CRUD ─────────────────────────────────────────────────
+router.post('/admin/menuItems', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { name, description, price, price_23cm, category, image_url, available, sort_order } = req.body;
+    if (!name || price === undefined || !category) {
+      return res.status(400).json({ error: 'name, price y category son requeridos' });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO "menu_items" (name, description, price, price_23cm, category, image_url, available, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        name.trim(),
+        description?.trim() || null,
+        parseFloat(price),
+        price_23cm != null ? parseFloat(price_23cm) : null,
+        category,
+        image_url || null,
+        available !== false,
+        sort_order ?? 0,
+      ],
+    );
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/menuItems POST error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/admin/menuItems/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'sort_order'];
+    const body = req.body as Record<string, any>;
+    const entries = Object.entries(body).filter(([k]) => allowed.includes(k) && body[k] !== undefined);
+    if (!entries.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    const vals: any[] = entries.map(([, v]) => v);
+    const sets = entries.map(([c], i) => `"${sc(c)}" = $${i + 1}`).join(', ');
+    vals.push(req.params['id']);
+    const { rows } = await pool.query(
+      `UPDATE "menu_items" SET ${sets} WHERE "id" = $${vals.length} RETURNING *`,
+      vals,
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' });
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/menuItems PATCH error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/admin/menuItems/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { rowCount } = await pool.query(
+      `DELETE FROM "menu_items" WHERE "id" = $1`,
+      [req.params['id']],
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Producto no encontrado' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/menuItems DELETE error');
     return res.status(500).json({ error: err.message });
   }
 });

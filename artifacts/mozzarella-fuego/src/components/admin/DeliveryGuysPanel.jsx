@@ -3,14 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { UserPlus, Pencil, Check, X, Power, PowerOff, Phone, User, Trash2 } from 'lucide-react';
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
-
 async function apiFetch(path, options = {}) {
   const res = await fetch(path, {
     ...options,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'x-admin-password': ADMIN_PASSWORD,
       ...(options.headers || {}),
     },
   });
@@ -31,7 +29,7 @@ function DriverRow({ driver, onUpdate }) {
     try {
       await apiFetch(`/api/admin/deliveryGuys/${driver.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ password: ADMIN_PASSWORD, name, phone }),
+        body: JSON.stringify({ name, phone }),
       });
       onUpdate();
       setEditing(false);
@@ -47,7 +45,7 @@ function DriverRow({ driver, onUpdate }) {
     try {
       await apiFetch(`/api/admin/deliveryGuys/${driver.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ password: ADMIN_PASSWORD, active: !driver.active }),
+        body: JSON.stringify({ active: !driver.active }),
       });
       onUpdate();
     } catch (e) {
@@ -182,7 +180,7 @@ function AddDriverForm({ onAdd }) {
     try {
       await apiFetch('/api/admin/deliveryGuys', {
         method: 'POST',
-        body: JSON.stringify({ password: ADMIN_PASSWORD, name, phone }),
+        body: JSON.stringify({ name, phone }),
       });
       setName('');
       setPhone('');

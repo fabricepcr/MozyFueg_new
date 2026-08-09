@@ -3,20 +3,34 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Lock } from 'lucide-react';
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
-
 export default function AdminLogin({ onSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
+    setLoading(true);
+    setError(false);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        setError(true);
+        setPassword('');
+        return;
+      }
       sessionStorage.setItem('admin_auth', '1');
       onSuccess();
-    } else {
+    } catch {
       setError(true);
       setPassword('');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -39,9 +53,12 @@ export default function AdminLogin({ onSuccess }) {
             onChange={(e) => { setPassword(e.target.value); setError(false); }}
             className={error ? 'border-destructive' : ''}
             autoFocus
+            autoComplete="current-password"
           />
           {error && <p className="text-destructive text-sm text-center">Contraseña incorrecta</p>}
-          <Button type="submit" className="w-full">Entrar</Button>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Verificando…' : 'Entrar'}
+          </Button>
         </form>
       </div>
     </div>

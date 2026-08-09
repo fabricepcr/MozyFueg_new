@@ -11,6 +11,7 @@ import OrderDetailModal from '@/components/admin/OrderDetailModal';
 import StorePanel from '@/components/admin/StorePanel';
 import PizzasPanel from '@/components/admin/PizzasPanel';
 import DeliveryGuysPanel from '@/components/admin/DeliveryGuysPanel';
+import AdminMenu from '@/components/admin/AdminMenu';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { initSound, startSoundLoop, stopSoundLoop, unlockSound, testSound, onSoundStateChange } from '@/lib/orderSound';
 
@@ -33,17 +34,31 @@ const ALERTABLE_STATUSES = ['pending', 'confirmed'];
 
 const TABS = [
   { key: 'pedidos',      label: '🍕 Pedidos' },
+  { key: 'carta',        label: '📋 Carta' },
   { key: 'pizzas',       label: '🧀 Disponibilidad' },
-  { key: 'tienda',       label: '🛵 Gestión de tienda' },
+  { key: 'tienda',       label: '🛵 Tienda' },
   { key: 'repartidores', label: '🏍️ Repartidores' },
 ];
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
 const DRIVER_ASSIGN_STATUSES = ['confirmed', 'preparing', 'delivering'];
 
 function AdminOrdersInner() {
   const [isAuthed, setIsAuthed] = useState(() => sessionStorage.getItem('admin_auth') === '1');
   const [activeTab, setActiveTab] = useState('pedidos');
+
+  // Verify the server session is still valid on mount (e.g. after page reload or expiry).
+  useEffect(() => {
+    if (!isAuthed) return;
+    fetch('/api/admin/me', { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.authed) {
+          sessionStorage.removeItem('admin_auth');
+          setIsAuthed(false);
+        }
+      })
+      .catch(() => {}); // network error — keep showing UI; next API call will 401
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [refundingId, setRefundingId] = useState(null);
   const [refundConfirmId, setRefundConfirmId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
@@ -62,7 +77,7 @@ function AdminOrdersInner() {
     queryKey: ['delivery-guys'],
     queryFn: async () => {
       const res = await fetch('/api/admin/deliveryGuys', {
-        headers: { 'x-admin-password': ADMIN_PASSWORD },
+        credentials: 'include',
       });
       const json = await res.json();
       return json.data || [];
@@ -153,7 +168,8 @@ function AdminOrdersInner() {
     try {
       await fetch(`/api/admin/orders/${orderId}/assignDriver`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
         body: JSON.stringify({ driver_id: driverId || null }),
       });
       queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
@@ -263,6 +279,8 @@ function AdminOrdersInner() {
             </button>
           ))}
         </div>
+
+        {activeTab === 'carta' && <AdminMenu />}
 
         {activeTab === 'pizzas' && <PizzasPanel />}
 

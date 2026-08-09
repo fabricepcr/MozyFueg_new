@@ -5,8 +5,6 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
-
 const DAYS = [
   { key: 'monday', label: 'Lunes' },
   { key: 'tuesday', label: 'Martes' },
@@ -24,7 +22,8 @@ async function callAdminSettings(action, data) {
   const res = await fetch('/api/adminSettings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, password: ADMIN_PASSWORD, ...(data || {}) }),
+    credentials: 'include',
+    body: JSON.stringify({ action, ...(data || {}) }),
   });
   const json = await res.json();
   if (json?.error) throw new Error(json.error);

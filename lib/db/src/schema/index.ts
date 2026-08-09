@@ -49,6 +49,7 @@ export const menuItemsTable = pgTable("menu_items", {
   name: text("name").notNull().default(""),
   description: text("description").default(""),
   price: numeric("price", { precision: 10, scale: 2 }).notNull().default("0"),
+  price_23cm: numeric("price_23cm", { precision: 10, scale: 2 }),
   category: text("category").default(""),
   available: boolean("available").default(true),
   sort_order: integer("sort_order").default(0),

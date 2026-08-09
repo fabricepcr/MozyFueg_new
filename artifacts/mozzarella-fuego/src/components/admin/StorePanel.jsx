@@ -3,12 +3,11 @@ import { Loader2, Truck, Package, Store, Save } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
-
 async function getSettings() {
   const res = await fetch('/api/adminSettings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ action: 'get' }),
   });
   const data = await res.json();
@@ -20,7 +19,8 @@ async function saveSettings(settings) {
   const res = await fetch('/api/adminSettings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'update', password: ADMIN_PASSWORD, settings }),
+    credentials: 'include',
+    body: JSON.stringify({ action: 'update', settings }),
   });
   const data = await res.json();
   if (data?.error) throw new Error(data.error);

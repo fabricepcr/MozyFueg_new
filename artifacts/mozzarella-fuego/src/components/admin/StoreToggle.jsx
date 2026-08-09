@@ -2,12 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, Store, AlertCircle, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
-
 async function callAdmin(body) {
   const res = await fetch('/api/adminSettings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
@@ -43,7 +42,7 @@ export default function StoreToggle() {
     if (saving) return;
     setSaving(true);
     try {
-      await callAdmin({ action: 'updateSetting', password: ADMIN_PASSWORD, key: 'store_open', value: val });
+      await callAdmin({ action: 'updateSetting', key: 'store_open', value: val });
       setStoreOpen(val);
       toast({
         title: val ? '✅ Tienda abierta' : '🔴 Tienda cerrada',

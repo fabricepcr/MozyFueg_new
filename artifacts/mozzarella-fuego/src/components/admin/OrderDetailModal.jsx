@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { X, MapPin, Clock, Package, Bike, Store, CreditCard, Calendar, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-const ADMIN_PASSWORD = 'mozzarellayfuego123';
 
 const STATUS_CONFIG = {
   payment_pending: { label: 'Pago pendiente', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
@@ -27,7 +26,7 @@ export default function OrderDetailModal({ order, onClose }) {
 
   useEffect(() => {
     if (!order?.assigned_driver_id) { setDriver(null); return; }
-    fetch('/api/admin/deliveryGuys', { headers: { 'x-admin-password': ADMIN_PASSWORD } })
+    fetch('/api/admin/deliveryGuys', { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
         const found = (json.data || []).find(d => d.id === order.assigned_driver_id);

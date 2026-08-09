@@ -7,6 +7,7 @@ async function proxy(payload) {
   const res = await fetch('/api/supabaseProxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(payload),
   });
   const json = await res.json();
