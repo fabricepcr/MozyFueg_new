@@ -10,6 +10,7 @@ import ThermerShare from '@/components/admin/ThermerShare';
 import OrderDetailModal from '@/components/admin/OrderDetailModal';
 import StorePanel from '@/components/admin/StorePanel';
 import PizzasPanel from '@/components/admin/PizzasPanel';
+import DeliveryGuysPanel from '@/components/admin/DeliveryGuysPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { initSound, startSoundLoop, stopSoundLoop, unlockSound, testSound, onSoundStateChange } from '@/lib/orderSound';
 
@@ -31,10 +32,14 @@ const ACTIVE_STATUSES = ['payment_pending', 'pending', 'confirmed', 'preparing',
 const ALERTABLE_STATUSES = ['pending', 'confirmed'];
 
 const TABS = [
-  { key: 'pedidos', label: '🍕 Pedidos' },
-  { key: 'pizzas',  label: '🧀 Disponibilidad' },
-  { key: 'tienda',  label: '🛵 Gestión de tienda' },
+  { key: 'pedidos',      label: '🍕 Pedidos' },
+  { key: 'pizzas',       label: '🧀 Disponibilidad' },
+  { key: 'tienda',       label: '🛵 Gestión de tienda' },
+  { key: 'repartidores', label: '🏍️ Repartidores' },
 ];
+
+const ADMIN_PASSWORD = 'mozzarellayfuego123';
+const DRIVER_ASSIGN_STATUSES = ['confirmed', 'preparing', 'delivering'];
 
 function AdminOrdersInner() {
   const [isAuthed, setIsAuthed] = useState(() => sessionStorage.getItem('admin_auth') === '1');
@@ -47,10 +52,24 @@ function AdminOrdersInner() {
   const [newOrderAlert, setNewOrderAlert] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [soundOk, setSoundOk] = useState(false);
+  const [assigningDriver, setAssigningDriver] = useState({});
 
   const alertedIdsRef = useRef(new Set());
   const seededRef = useRef(false);
   const queryClient = useQueryClient();
+
+  const { data: drivers = [] } = useQuery({
+    queryKey: ['delivery-guys'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/deliveryGuys', {
+        headers: { 'x-admin-password': ADMIN_PASSWORD },
+      });
+      const json = await res.json();
+      return json.data || [];
+    },
+    enabled: isAuthed,
+    staleTime: 30000,
+  });
 
   const { data: orders = [], isLoading, isSuccess, refetch } = useQuery({
     queryKey: ['admin-orders'],
@@ -127,6 +146,20 @@ function AdminOrdersInner() {
     }
     await db.update('orders', orderId, { status: newStatus });
     queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+  };
+
+  const handleAssignDriver = async (orderId, driverId) => {
+    setAssigningDriver(prev => ({ ...prev, [orderId]: true }));
+    try {
+      await fetch(`/api/admin/orders/${orderId}/assignDriver`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': ADMIN_PASSWORD },
+        body: JSON.stringify({ driver_id: driverId || null }),
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+    } finally {
+      setAssigningDriver(prev => ({ ...prev, [orderId]: false }));
+    }
   };
 
   const handleCancelOrder = async (orderId) => {
@@ -235,6 +268,8 @@ function AdminOrdersInner() {
 
         {activeTab === 'tienda' && <StorePanel />}
 
+        {activeTab === 'repartidores' && <DeliveryGuysPanel />}
+
         {activeTab === 'pedidos' && <>
           <section className="mb-10">
             <h2 className="font-heading font-semibold text-lg mb-4 flex items-center gap-2">
@@ -298,6 +333,30 @@ function AdminOrdersInner() {
                           ))}
                         </SelectContent>
                       </Select>
+
+                      {/* Driver assignment — only for delivery orders in active statuses */}
+                      {order.order_type === 'delivery' && DRIVER_ASSIGN_STATUSES.includes(order.status) && (
+                        <div className="mt-2">
+                          <label className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1">
+                            <Bike className="w-3 h-3" /> Repartidor asignado
+                          </label>
+                          <Select
+                            value={order.assigned_driver_id || 'none'}
+                            onValueChange={val => handleAssignDriver(order.id, val === 'none' ? null : val)}
+                            disabled={assigningDriver[order.id]}
+                          >
+                            <SelectTrigger className="rounded-xl text-sm bg-purple-50 border-purple-200">
+                              <SelectValue placeholder="Asignar repartidor…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">— Sin asignar —</SelectItem>
+                              {drivers.filter(d => d.active).map(d => (
+                                <SelectItem key={d.id} value={d.id}>{d.name} · {d.phone}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
 
                       {refundConfirmId === order.id ? (
                         <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-3">

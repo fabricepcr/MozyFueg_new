@@ -9,6 +9,16 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 
+export const deliveryGuysTable = pgTable("delivery_guys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  phone: text("phone").notNull(),
+  active: boolean("active").default(true),
+  singleton_key: text("singleton_key"),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const ordersTable = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   customer_name: text("customer_name").notNull().default(""),
@@ -25,8 +35,10 @@ export const ordersTable = pgTable("orders", {
   delivery_distance_km: numeric("delivery_distance_km", { precision: 8, scale: 2 }),
   payment_method: text("payment_method").default(""),
   status: text("status").notNull().default("pending"),
+  scheduled_for: text("scheduled_for").default(""),
   stripe_session_id: text("stripe_session_id"),
   stripe_payment_intent_id: text("stripe_payment_intent_id"),
+  assigned_driver_id: uuid("assigned_driver_id").references(() => deliveryGuysTable.id, { onDelete: "set null" }),
   refunded_at: timestamp("refunded_at", { withTimezone: true }),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),

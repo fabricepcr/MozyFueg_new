@@ -1,6 +1,8 @@
-import React from 'react';
-import { X, MapPin, Clock, Package, Bike, Store, CreditCard, Calendar } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, MapPin, Clock, Package, Bike, Store, CreditCard, Calendar, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+const ADMIN_PASSWORD = 'mozzarellayfuego123';
 
 const STATUS_CONFIG = {
   payment_pending: { label: 'Pago pendiente', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
@@ -21,6 +23,19 @@ const PAYMENT_LABELS = {
 };
 
 export default function OrderDetailModal({ order, onClose }) {
+  const [driver, setDriver] = useState(null);
+
+  useEffect(() => {
+    if (!order?.assigned_driver_id) { setDriver(null); return; }
+    fetch('/api/admin/deliveryGuys', { headers: { 'x-admin-password': ADMIN_PASSWORD } })
+      .then(r => r.json())
+      .then(json => {
+        const found = (json.data || []).find(d => d.id === order.assigned_driver_id);
+        setDriver(found || null);
+      })
+      .catch(() => {});
+  }, [order?.assigned_driver_id]);
+
   if (!order) return null;
 
   const status = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
@@ -74,6 +89,26 @@ export default function OrderDetailModal({ order, onClose }) {
               <p className="text-sm text-muted-foreground">📝 {order.customer_notes}</p>
             )}
           </div>
+
+          {/* Repartidor asignado */}
+          {order.order_type === 'delivery' && order.assigned_driver_id && (
+            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <User className="w-4 h-4 text-purple-700" />
+              </div>
+              <div>
+                <p className="text-xs text-purple-600 font-semibold uppercase tracking-wide mb-0.5">Repartidor asignado</p>
+                {driver ? (
+                  <>
+                    <p className="text-sm font-semibold">{driver.name}</p>
+                    <p className="text-xs text-muted-foreground">📞 {driver.phone}</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Cargando…</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Tipo de pedido y pago */}
           <div className="grid grid-cols-2 gap-3">

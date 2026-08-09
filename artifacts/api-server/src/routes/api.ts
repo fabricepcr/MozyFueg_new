@@ -362,6 +362,128 @@ router.post("/supabaseProxy", async (req, res) => {
   }
 });
 
+// ── Admin: Delivery Guys CRUD ──────────────────────────────────────────────
+function requireAdmin(req: any, res: any): boolean {
+  const pw = req.body?.password || req.headers['x-admin-password'];
+  if (pw !== ADMIN_PASSWORD) {
+    res.status(401).json({ error: 'No autorizado' });
+    return false;
+  }
+  return true;
+}
+
+router.get('/admin/deliveryGuys', async (req, res) => {
+  try {
+    const pw = req.headers['x-admin-password'];
+    if (pw !== ADMIN_PASSWORD) return res.status(401).json({ error: 'No autorizado' });
+    const { rows } = await pool.query(
+      `SELECT * FROM "delivery_guys" ORDER BY "name" ASC`,
+    );
+    return res.json({ data: rows });
+  } catch (err: any) {
+    req.log.error({ err }, 'deliveryGuys GET error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/deliveryGuys', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { name, phone } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'name y phone son requeridos' });
+    const { rows } = await pool.query(
+      `INSERT INTO "delivery_guys" (name, phone) VALUES ($1, $2) RETURNING *`,
+      [name.trim(), phone.trim()],
+    );
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'deliveryGuys POST error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/admin/deliveryGuys/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { name, phone, active } = req.body;
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (name !== undefined) { sets.push(`"name" = $${vals.length + 1}`); vals.push(name.trim()); }
+    if (phone !== undefined) { sets.push(`"phone" = $${vals.length + 1}`); vals.push(phone.trim()); }
+    if (active !== undefined) { sets.push(`"active" = $${vals.length + 1}`); vals.push(!!active); }
+    if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    sets.push(`"updated_at" = NOW()`);
+    vals.push(req.params['id']);
+    const { rows } = await pool.query(
+      `UPDATE "delivery_guys" SET ${sets.join(', ')} WHERE "id" = $${vals.length} RETURNING *`,
+      vals,
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Repartidor no encontrado' });
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'deliveryGuys PATCH error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+router.delete('/admin/deliveryGuys/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    // Unassign from orders before deleting
+    await pool.query(
+      `UPDATE "orders" SET "assigned_driver_id" = NULL WHERE "assigned_driver_id" = $1`,
+      [req.params['id']],
+    );
+    const { rowCount } = await pool.query(
+      `DELETE FROM "delivery_guys" WHERE "id" = $1`,
+      [req.params['id']],
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Repartidor no encontrado' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, 'deliveryGuys DELETE error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/admin/orders/:id/assignDriver', async (req, res) => {
+  try {
+    const pw = req.body?.password || req.headers['x-admin-password'];
+    if (pw !== ADMIN_PASSWORD) return res.status(401).json({ error: 'No autorizado' });
+
+    const driverId: string | null = req.body.driver_id ?? null;
+
+    // Validate driver if provided
+    if (driverId !== null) {
+      if (!UUID_RE.test(driverId)) {
+        return res.status(400).json({ error: 'driver_id no es un UUID válido' });
+      }
+      const { rows: driverRows } = await pool.query(
+        `SELECT id, active FROM "delivery_guys" WHERE id = $1`,
+        [driverId],
+      );
+      if (!driverRows.length) {
+        return res.status(404).json({ error: 'Repartidor no encontrado' });
+      }
+      if (!driverRows[0].active) {
+        return res.status(400).json({ error: 'El repartidor no está activo' });
+      }
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE "orders" SET "assigned_driver_id" = $1 WHERE "id" = $2 RETURNING *`,
+      [driverId, req.params['id']],
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' });
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'assignDriver error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Admin settings ─────────────────────────────────────────────────────────
 router.post("/adminSettings", async (req, res) => {
   try {
