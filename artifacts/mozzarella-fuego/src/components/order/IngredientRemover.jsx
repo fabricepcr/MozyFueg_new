@@ -45,14 +45,14 @@ export default function IngredientRemover({ ingredients, selected, onChange }) {
               <label
                 key={ingredient}
                 className={`flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 transition-colors ${
-                  isChecked ? 'bg-red-50 text-red-700' : 'hover:bg-muted/50 text-foreground/80'
+                  isChecked ? 'bg-amber-50 text-amber-700' : 'hover:bg-muted/50 text-foreground/80'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={isChecked}
                   onChange={() => toggle(ingredient)}
-                  className="w-4 h-4 accent-red-500 cursor-pointer flex-shrink-0"
+                  className="w-4 h-4 accent-amber-500 cursor-pointer flex-shrink-0"
                 />
                 <span className="text-sm">{ingredient}</span>
               </label>

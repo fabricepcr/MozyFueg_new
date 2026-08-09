@@ -14,6 +14,8 @@ import TrackOrder from '@/pages/TrackOrder';
 import OrderConfirmed from '@/pages/OrderConfirmed';
 import Reservations from '@/pages/Reservations';
 import ReservationPolicy from '@/pages/ReservationPolicy';
+import Projeto from '@/pages/Projeto';
+import MisPedidos from '@/pages/MisPedidos';
 
 const AuthenticatedApp = () => {
   return (
@@ -25,9 +27,11 @@ const AuthenticatedApp = () => {
       <Route path="/admin/pedidos" element={<AdminOrders />} />
       <Route path="/repartidor" element={<DriverView />} />
       <Route path="/seguimiento" element={<TrackOrder />} />
+      <Route path="/mis-pedidos" element={<MisPedidos />} />
       <Route path="/pedido-confirmado" element={<OrderConfirmed />} />
       <Route path="/reservas" element={<Reservations />} />
       <Route path="/politica-reservas" element={<ReservationPolicy />} />
+      <Route path="/projeto" element={<Projeto />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );

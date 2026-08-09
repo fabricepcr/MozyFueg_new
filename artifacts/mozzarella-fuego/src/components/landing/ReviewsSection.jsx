@@ -17,7 +17,7 @@ const reviews = [
     text: 'Muy ricas pizzas brasileñas y muy buena atención.',
     rating: 5,
     initials: 'GU',
-    color: 'bg-red-100 text-red-700',
+    color: 'bg-emerald-100 text-emerald-700',
   },
   {
     name: 'Veronica Barretto',
@@ -31,7 +31,7 @@ const reviews = [
     text: 'Fuimos al rodízio de pizza por la noche. La calidad de las pizzas estupenda y hay mucha variedad. El atendimiento rápido y eficiente. Relación calidad-precio perfecto. 100% recomendable!',
     rating: 5,
     initials: 'CB',
-    color: 'bg-rose-100 text-rose-700',
+    color: 'bg-teal-100 text-teal-700',
   },
   {
     name: 'Wander Watson',

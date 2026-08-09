@@ -1,5 +1,4 @@
 import { Router, type IRouter } from "express";
-import Stripe from "stripe";
 import { pool } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -14,6 +13,7 @@ const ALLOWED_TABLES = new Set([
   "store_settings",
   "delivery_settings",
   "reservations",
+  "toppings",
 ]);
 
 /** Validate table name against allow-list */
@@ -42,6 +42,19 @@ function calcDeliveryFee(km: number): number {
   return 8;
 }
 
+// ── Toppings ───────────────────────────────────────────────────────────────
+router.get("/toppings", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM "toppings" WHERE "available" = true ORDER BY "sort_order" ASC`,
+    );
+    return res.json({ data: rows });
+  } catch (err: any) {
+    req.log.error({ err }, "toppings error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Menu items ─────────────────────────────────────────────────────────────
 router.get("/menuItems", async (req, res) => {
   try {
@@ -55,120 +68,7 @@ router.get("/menuItems", async (req, res) => {
   }
 });
 
-// ── Stripe: create checkout session ────────────────────────────────────────
-router.post("/createCheckoutSession", async (req, res) => {
-  try {
-    const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
-    const { orderData, successUrl, cancelUrl } = req.body;
-
-    if (!orderData?.items?.length) {
-      return res.status(400).json({ error: "Missing or empty order items" });
-    }
-
-    const subtotal =
-      parseFloat(orderData.subtotal) ||
-      orderData.items.reduce(
-        (s: number, i: any) => s + i.price * i.quantity,
-        0,
-      );
-    const delivery_fee = parseFloat(orderData.delivery_fee) || 0;
-    const tip = parseFloat(orderData.tip) || 0;
-    const total =
-      parseFloat(orderData.total) > 0
-        ? parseFloat(orderData.total)
-        : parseFloat((subtotal + delivery_fee + tip).toFixed(2));
-
-    const { rows } = await pool.query(
-      `INSERT INTO "orders"
-         (customer_name, customer_phone, customer_address, customer_notes,
-          pickup_time, order_type, payment_method, status, items,
-          subtotal, delivery_fee, delivery_distance_km, tip, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       RETURNING *`,
-      [
-        String(orderData.customer_name || "Sin nombre").trim(),
-        String(orderData.customer_phone || "Sin teléfono").trim(),
-        orderData.customer_address || "",
-        orderData.customer_notes || "",
-        orderData.pickup_time || "",
-        orderData.order_type || "delivery",
-        "tarjeta",
-        "payment_pending",
-        JSON.stringify(orderData.items),
-        subtotal,
-        delivery_fee,
-        parseFloat(orderData.delivery_distance_km) || null,
-        tip,
-        total,
-      ],
-    );
-    const order = rows[0];
-
-    const lineItems = orderData.items.map((item: any) => ({
-      price_data: {
-        currency: "eur",
-        product_data: { name: String(item.name || "Producto") },
-        unit_amount: Math.max(1, Math.round((item.price || 0) * 100)),
-      },
-      quantity: Math.max(1, parseInt(item.quantity) || 1),
-    }));
-    if (delivery_fee > 0)
-      lineItems.push({
-        price_data: {
-          currency: "eur",
-          product_data: { name: "Gastos de envío" },
-          unit_amount: Math.round(delivery_fee * 100),
-        },
-        quantity: 1,
-      });
-    if (tip > 0)
-      lineItems.push({
-        price_data: {
-          currency: "eur",
-          product_data: { name: "Propina para el repartidor" },
-          unit_amount: Math.round(tip * 100),
-        },
-        quantity: 1,
-      });
-
-    const origin =
-      (req.headers["origin"] as string) || "https://mozzarellayfuego.com";
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      line_items: lineItems,
-      mode: "payment",
-      success_url:
-        successUrl ||
-        `${origin}/pedido-confirmado?orderId={CHECKOUT_SESSION_ID}&stripe=1`,
-      cancel_url: cancelUrl || `${origin}/checkout`,
-      payment_intent_data: {
-        description: `Pedido Mozzarella y Fuego - ${order.customer_name}`,
-      },
-      metadata: {
-        order_id: order.id,
-        customer_name: order.customer_name,
-        customer_phone: order.customer_phone,
-        order_type: order.order_type,
-      },
-    });
-
-    await pool.query(
-      `UPDATE "orders" SET stripe_session_id = $1 WHERE id = $2`,
-      [session.id, order.id],
-    );
-
-    return res.json({
-      url: session.url,
-      sessionId: session.id,
-      orderId: order.id,
-    });
-  } catch (err: any) {
-    req.log.error({ err }, "createCheckoutSession error");
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Create order (cash / on-pickup) ────────────────────────────────────────
+// ── Create order (pay on delivery / pickup) ────────────────────────────────
 router.post("/createOrderDirect", async (req, res) => {
   try {
     const {
@@ -255,7 +155,7 @@ router.post("/calcularEnvio", async (req, res) => {
   }
 });
 
-// ── Refund order ────────────────────────────────────────────────────────────
+// ── Cancel order (no online payment — just mark cancelled in DB) ────────────
 router.post("/refundOrder", async (req, res) => {
   try {
     const { orderId, adminPassword } = req.body;
@@ -263,78 +163,67 @@ router.post("/refundOrder", async (req, res) => {
       return res.status(403).json({ error: "No autorizado" });
     }
     if (!orderId) return res.status(400).json({ error: "orderId requerido" });
-
-    const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
-
-    const { rows } = await pool.query(
-      `SELECT * FROM "orders" WHERE id = $1`,
-      [orderId],
-    );
-    const order = rows[0];
-    if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
-
-    let refundId: string | null = null;
-    if (order.stripe_session_id) {
-      try {
-        const session = await stripe.checkout.sessions.retrieve(
-          order.stripe_session_id,
-        );
-        if (session.payment_intent) {
-          const refund = await stripe.refunds.create({
-            payment_intent: session.payment_intent as string,
-            reason: "requested_by_customer",
-          });
-          refundId = refund.id;
-        }
-      } catch (stripeErr: any) {
-        req.log.warn({ err: stripeErr }, "Stripe refund error");
-      }
-    }
-
-    await pool.query(
+    const { rowCount } = await pool.query(
       `UPDATE "orders" SET status = 'cancelled', refunded_at = NOW() WHERE id = $1`,
       [orderId],
     );
-
-    return res.json({
-      success: true,
-      refundId,
-      message: "Pedido cancelado correctamente",
-    });
+    if (!rowCount) return res.status(404).json({ error: "Pedido no encontrado" });
+    return res.json({ success: true, message: "Pedido cancelado correctamente" });
   } catch (err: any) {
     req.log.error({ err }, "refundOrder error");
     return res.status(500).json({ error: err.message });
   }
 });
 
-// ── Stripe webhook ─────────────────────────────────────────────────────────
-router.post("/stripeWebhook", async (req, res) => {
-  const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "");
-  const sig = req.headers["stripe-signature"] as string;
+// ── Projeto task tracker ────────────────────────────────────────────────────
+router.get("/projeto/tasks", async (req, res) => {
   try {
-    const event = stripe.webhooks.constructEvent(
-      req.body as Buffer,
-      sig,
-      process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
+    const { rows: tasks } = await pool.query(
+      `SELECT * FROM "projeto_tasks" ORDER BY sort_order ASC`,
     );
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = session.metadata?.order_id;
-      if (orderId) {
-        await pool.query(
-          `UPDATE "orders"
-           SET status = 'confirmed',
-               stripe_session_id = $1,
-               stripe_payment_intent_id = $2
-           WHERE id = $3`,
-          [session.id, session.payment_intent, orderId],
-        );
-      }
-    }
-    return res.json({ received: true });
+    const { rows: checklist } = await pool.query(
+      `SELECT * FROM "projeto_checklist" ORDER BY sort_order ASC`,
+    );
+    const data = tasks.map((t) => ({
+      ...t,
+      checklist: checklist.filter((c) => c.task_id === t.id),
+    }));
+    return res.json({ data });
   } catch (err: any) {
-    req.log.error({ err }, "Stripe webhook error");
-    return res.status(400).json({ error: err.message });
+    req.log.error({ err }, "projeto/tasks error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/projeto/tasks/:id", async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowed = ["a_fazer", "em_andamento", "em_qa", "concluido"];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+    await pool.query(
+      `UPDATE "projeto_tasks" SET status = $1, updated_at = NOW() WHERE id = $2`,
+      [status, req.params["id"]],
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "projeto/tasks patch error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/projeto/checklist/:id", async (req, res) => {
+  try {
+    const { checked } = req.body;
+    await pool.query(
+      `UPDATE "projeto_checklist" SET checked = $1, updated_at = NOW() WHERE id = $2`,
+      [!!checked, req.params["id"]],
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "projeto/checklist patch error");
+    return res.status(500).json({ error: err.message });
   }
 });
 

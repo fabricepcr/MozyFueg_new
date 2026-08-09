@@ -1,10 +1,29 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
 const CartContext = createContext(null);
+const STORAGE_KEY = 'mf_cart_v1';
+
+function loadCart() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCart(items) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {}
+}
 
 export function CartProvider({ children }) {
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState(loadCart);
   const [isOpen, setIsOpen] = useState(false);
+
+  // Persist to localStorage whenever items change
+  useEffect(() => { saveCart(items); }, [items]);
 
   const addItem = useCallback((menuItem) => {
     setItems(prev => {
@@ -28,7 +47,10 @@ export function CartProvider({ children }) {
     }
   }, []);
 
-  const clearCart = useCallback(() => setItems([]), []);
+  const clearCart = useCallback(() => {
+    setItems([]);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  }, []);
 
   const updateItem = useCallback((id, updatedItem) => {
     setItems(prev => prev.map(i => i.id === id ? { ...updatedItem, quantity: i.quantity } : i));

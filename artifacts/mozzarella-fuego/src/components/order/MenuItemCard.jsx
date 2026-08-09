@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, Ban } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
 import { motion } from 'framer-motion';
-import PizzaCustomizerModal from './PizzaCustomizerModal';
+import PizzaWizard from './PizzaWizard';
 
 const isPizza = (category) => category === 'pizzas' || category === 'pizzas_dulces';
 const isDrink = (category) => category === 'bebidas';
@@ -41,18 +41,32 @@ export default function MenuItemCard({ item }) {
     }
   };
 
-  const handleConfirm = ({ size, extras, removedIngredients, basePrice, finalPrice }) => {
-    const sizeSuffix = size ? ` (${size})` : '';
-    const extrasSuffix = extras.length > 0 ? ` + ${extras.map((e) => e.name).join(', ')}` : '';
+  const handleConfirm = ({ size, division, flavors, toppings, basePrice, finalPrice }) => {
+    const primaryFlavor = flavors?.[0];
+    const primaryItem   = primaryFlavor?.item || item;
+    const sizeLabel     = size ? ` (${size})` : '';
+
+    // Display name: "Strogonoff + Cuatro Quesos (33cm)"
+    const displayName = (!flavors || flavors.length <= 1)
+      ? primaryItem.name + sizeLabel
+      : flavors.map(f => f.item.name.replace(/^Pizza /i, '')).join(' + ') + sizeLabel;
+
     addItem({
-      ...item,
-      id: `${item.id}_${size || 'single'}_${Date.now()}`,
-      name: `${item.name}${sizeSuffix}${extrasSuffix}`,
-      price: finalPrice,
-      removed_ingredients: removedIngredients.length > 0 ? removedIngredients : undefined,
+      ...primaryItem,
+      id: `${primaryItem.id}_${size || 'single'}_${Date.now()}`,
+      name: displayName,
+      price: finalPrice ?? basePrice,
       _size: size,
-      _extras: extras,
-      _originalItem: item,
+      _division: division,
+      _flavors: (flavors || []).map((f, i) => ({
+        id:       f.item.id,
+        name:     f.item.name,
+        price:    size === '24cm' ? (f.item.price_23cm ?? f.item.price) : f.item.price,
+        toppings: toppings?.[i] || [],
+        _itemObj: f.item,
+      })),
+      _toppings:     toppings || [],
+      _originalItem: primaryItem,
     });
     setShowModal(false);
   };
@@ -82,7 +96,7 @@ export default function MenuItemCard({ item }) {
             />
             {soldOut && (
               <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
-                <span className="bg-red-600 text-white font-heading font-bold text-sm tracking-wide px-4 py-1.5 rounded-full shadow-lg uppercase">
+                <span className="bg-slate-600 text-white font-heading font-bold text-sm tracking-wide px-4 py-1.5 rounded-full shadow-lg uppercase">
                   Agotada
                 </span>
               </div>
@@ -93,7 +107,7 @@ export default function MenuItemCard({ item }) {
         {/* Si no hay imagen, el badge va arriba a la derecha */}
         {!item.image_url && soldOut && (
           <div className="absolute top-3 right-3 z-10">
-            <span className="bg-red-600 text-white font-bold text-[10px] tracking-wide px-2.5 py-1 rounded-full shadow uppercase">
+            <span className="bg-slate-600 text-white font-bold text-[10px] tracking-wide px-2.5 py-1 rounded-full shadow uppercase">
               Agotada
             </span>
           </div>
@@ -162,7 +176,7 @@ export default function MenuItemCard({ item }) {
       </motion.div>
 
       {showModal && (
-        <PizzaCustomizerModal
+        <PizzaWizard
           item={item}
           onClose={() => setShowModal(false)}
           onConfirm={handleConfirm}

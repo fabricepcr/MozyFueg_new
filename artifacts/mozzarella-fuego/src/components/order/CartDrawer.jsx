@@ -6,7 +6,7 @@ import { useCart } from '@/lib/CartContext';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchMenuItems } from '@/lib/api';
-import PizzaCustomizerModal from './PizzaCustomizerModal';
+import PizzaWizard from './PizzaWizard';
 
 export default function CartDrawer({ storeOpen = true }) {
   const { items, updateQuantity, removeItem, updateItem, total, itemCount, isOpen, setIsOpen } = useCart();
@@ -46,27 +46,40 @@ export default function CartDrawer({ storeOpen = true }) {
     soldOutItems.forEach(i => removeItem(i.id));
   };
 
-  const handleEditSave = ({ size, extras, removedIngredients, basePrice, finalPrice }) => {
-    const orig = editingItem._originalItem || editingItem;
-    const sizeSuffix = size ? ` (${size})` : '';
-    const extrasSuffix = extras.length > 0 ? ` + ${extras.map(e => e.name).join(', ')}` : '';
+  const handleEditSave = ({ size, division, flavors, toppings, basePrice, finalPrice }) => {
+    const primaryFlavor = flavors?.[0];
+    const primaryItem   = primaryFlavor?.item || editingItem._originalItem || editingItem;
+    const sizeLabel     = size ? ` (${size})` : '';
+
+    const displayName = (!flavors || flavors.length <= 1)
+      ? primaryItem.name + sizeLabel
+      : flavors.map(f => f.item.name.replace(/^Pizza /i, '')).join(' + ') + sizeLabel;
+
     updateItem(editingItem.id, {
       ...editingItem,
-      name: `${orig.name}${sizeSuffix}${extrasSuffix}`,
-      price: finalPrice,
-      removed_ingredients: removedIngredients.length > 0 ? removedIngredients : undefined,
-      _size: size,
-      _extras: extras,
-      _originalItem: orig,
+      name: displayName,
+      price: finalPrice ?? basePrice,
+      _size:     size,
+      _division: division,
+      _flavors:  (flavors || []).map((f, i) => ({
+        id:       f.item.id,
+        name:     f.item.name,
+        price:    size === '24cm' ? (f.item.price_23cm ?? f.item.price) : f.item.price,
+        toppings: toppings?.[i] || [],
+        _itemObj: f.item,
+      })),
+      _toppings:     toppings || [],
+      _originalItem: primaryItem,
     });
     setEditingItem(null);
   };
 
   const getOriginalItem = (item) => item._originalItem || item;
   const getInitialValues = (item) => ({
-    size: item._size || null,
-    extras: item._extras || [],
-    removedIngredients: item.removed_ingredients || [],
+    size:     item._size || null,
+    division: item._division || null,
+    flavors:  item._flavors || null,
+    toppings: item._toppings || [],
   });
 
   return (
@@ -89,19 +102,19 @@ export default function CartDrawer({ storeOpen = true }) {
             <>
               {/* Aviso: hay productos que se han agotado */}
               {hasSoldOut && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 mt-3">
-                  <p className="text-red-800 font-semibold text-sm flex items-center gap-1.5">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-3">
+                  <p className="text-amber-800 font-semibold text-sm flex items-center gap-1.5">
                     <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                     {soldOutItems.length === 1
                       ? 'Un producto se ha agotado'
                       : `${soldOutItems.length} productos se han agotado`}
                   </p>
-                  <p className="text-red-600 text-xs mt-1">
+                  <p className="text-amber-700 text-xs mt-1">
                     Quítalos del carrito para poder tramitar el pedido.
                   </p>
                   <button
                     onClick={removeAllSoldOut}
-                    className="mt-2 w-full text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg py-2 transition-colors"
+                    className="mt-2 w-full text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg py-2 transition-colors"
                   >
                     Quitar productos agotados
                   </button>
@@ -115,28 +128,39 @@ export default function CartDrawer({ storeOpen = true }) {
                     <div
                       key={item.id}
                       className={`flex items-start gap-3 rounded-xl p-3 ${
-                        out ? 'bg-red-50 border border-red-200' : 'bg-muted/50'
+                        out ? 'bg-slate-50 border border-slate-200' : 'bg-muted/50'
                       }`}
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className={`font-medium text-sm ${out ? 'text-red-800 line-through' : ''}`}>
+                          <p className={`font-medium text-sm ${out ? 'text-slate-500 line-through' : ''}`}>
                             {item.name}
                           </p>
                           {out && (
-                            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
+                            <span className="bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
                               Agotada
                             </span>
                           )}
                         </div>
 
-                        {item.removed_ingredients?.length > 0 && (
-                          <p className="text-xs text-red-500 mt-0.5 leading-tight">
-                            Quitar: {item.removed_ingredients.map(r => r.replace(/^Sin /, '').toLowerCase()).join(', ')}
-                          </p>
-                        )}
+                        {/* Per-flavor removals (multi-flavor) or single-flavor */}
+                        {item._flavors?.some(f => f.removed?.length > 0)
+                          ? item._flavors.map((f, fi) => f.removed?.length > 0 && (
+                            <p key={fi} className="text-xs text-slate-500 mt-0.5 leading-tight">
+                              {item._flavors.length > 1
+                                ? `${f.name.replace(/^Pizza /i, '')}: Sin ${f.removed.map(r => r.replace(/^Sin /i, '').toLowerCase()).join(', ')}`
+                                : `Sin: ${f.removed.map(r => r.replace(/^Sin /i, '').toLowerCase()).join(', ')}`
+                              }
+                            </p>
+                          ))
+                          : item.removed_ingredients?.length > 0 && (
+                            <p className="text-xs text-slate-500 mt-0.5 leading-tight">
+                              Sin: {item.removed_ingredients.map(r => r.replace(/^Sin /, '').toLowerCase()).join(', ')}
+                            </p>
+                          )
+                        }
 
-                        <p className={`font-semibold text-sm mt-0.5 ${out ? 'text-red-400 line-through' : 'text-primary'}`}>
+                        <p className={`font-semibold text-sm mt-0.5 ${out ? 'text-slate-400 line-through' : 'text-primary'}`}>
                           {(item.price * item.quantity).toFixed(2)} €
                         </p>
 
@@ -188,9 +212,9 @@ export default function CartDrawer({ storeOpen = true }) {
                 </div>
 
                 {!storeOpen ? (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
-                    <p className="text-red-700 font-semibold text-sm">Restaurante cerrado</p>
-                    <p className="text-red-500 text-xs mt-0.5">No se aceptan pedidos ahora mismo</p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                    <p className="text-amber-700 font-semibold text-sm">Restaurante cerrado</p>
+                    <p className="text-amber-600 text-xs mt-0.5">No se aceptan pedidos ahora mismo</p>
                   </div>
                 ) : hasSoldOut ? (
                   <Button
@@ -206,6 +230,9 @@ export default function CartDrawer({ storeOpen = true }) {
                     </Button>
                   </Link>
                 )}
+                <Link to="/mis-pedidos" onClick={() => setIsOpen(false)} className="block text-center text-xs text-muted-foreground hover:text-primary transition-colors pt-1">
+                  Ver historial de pedidos
+                </Link>
               </div>
             </>
           )}
@@ -213,12 +240,11 @@ export default function CartDrawer({ storeOpen = true }) {
       </Sheet>
 
       {editingItem && (
-        <PizzaCustomizerModal
+        <PizzaWizard
           item={getOriginalItem(editingItem)}
           onClose={() => setEditingItem(null)}
           onConfirm={handleEditSave}
           initialValues={getInitialValues(editingItem)}
-          editMode={true}
         />
       )}
     </>

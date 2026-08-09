@@ -132,16 +132,7 @@ function AdminOrdersInner() {
   const handleCancelOrder = async (orderId) => {
     setRefundingId(orderId);
     setRefundConfirmId(null);
-    const order = orders.find(o => o.id === orderId);
-    if (order?.stripe_session_id) {
-      await fetch('/api/refundOrder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, adminPassword: 'mozzarellayfuego123' }),
-      });
-    } else {
-      await db.update('orders', orderId, { status: 'cancelled' });
-    }
+    await db.update('orders', orderId, { status: 'cancelled' });
     queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
     setRefundingId(null);
   };

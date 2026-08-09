@@ -1,16 +1,16 @@
-// API client — usa Supabase directamente, sin pasar por Base44
-import { supabase } from '@/lib/supabase.jsx';
+// API client — calls the Replit Postgres backend via /api/*
+// (The old Supabase client was replaced with a no-op stub; all data goes through Express.)
 
 export const fetchMenuItems = async () => {
-  const { data, error } = await supabase
-    .from('menu_items')
-    .select('*')
-    // ⚠️ Ya NO se filtra por available: queremos que los agotados se VEAN
-    // en la carta marcados como "Agotada" (antes desaparecían del todo).
-    // El filtrado real se hace en la UI (OrderMenu / MenuItemCard).
-    .order('sort_order', { ascending: true })
-    .limit(200);
+  const res = await fetch('/api/menuItems');
+  if (!res.ok) throw new Error(`menuItems fetch failed: ${res.status}`);
+  const json = await res.json();
+  return json.data || [];
+};
 
-  if (error) throw error;
-  return data || [];
+export const fetchToppings = async () => {
+  const res = await fetch('/api/toppings');
+  if (!res.ok) throw new Error(`toppings fetch failed: ${res.status}`);
+  const json = await res.json();
+  return json.data || [];
 };

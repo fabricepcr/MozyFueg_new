@@ -4,13 +4,14 @@ export async function fetchStoreSettings() {
   const res = await fetch('/api/adminSettings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'get' }),
+    body: JSON.stringify({ action: 'getPublicSettings' }),
   });
   const d = await res.json();
+  // Express returns: { data: { storeOpen, deliveryActive, pickupActive } }
   return {
-    store_open: d?.store_open !== false,
-    delivery_enabled: d?.delivery_enabled !== false,
-    pickup_enabled: d?.pickup_enabled !== false,
+    store_open: d?.data?.storeOpen !== false,
+    delivery_enabled: d?.data?.deliveryActive !== false,
+    pickup_enabled: d?.data?.pickupActive !== false,
   };
 }
 

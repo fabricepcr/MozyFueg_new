@@ -1,13 +1,38 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, MapPin, Loader2, AlertCircle, CheckCircle, Truck, Store, Clock, Heart, CreditCard, X, ShieldAlert, ChevronRight, Search } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, AlertCircle, CheckCircle, Truck, Store, Clock, Heart, CreditCard, X, ShieldAlert, ChevronRight, Search, Calendar, Banknote } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
 import { useToast } from '@/components/ui/use-toast';
 import { useStoreSettings } from '@/lib/useStoreSettings';
+
+// ── Opening-hours validation ─────────────────────────────────────────────────
+const DAY_KEY  = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+const DAY_ES   = ['domingos','lunes','martes','miércoles','jueves','viernes','sábados'];
+
+function validateScheduledTime(dateStr, timeStr, schedule) {
+  if (!dateStr || !timeStr || !schedule) return null;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dow = new Date(y, m - 1, d).getDay();          // 0=Sun … 6=Sat (local)
+  const dayKey = DAY_KEY[dow];
+  const dayEs  = DAY_ES[dow];
+  const daySched = schedule[dayKey];
+
+  if (!daySched?.enabled) {
+    return `No abrimos los ${dayEs}. Elige otro día.`;
+  }
+  const slots = daySched.slots || [];
+  const ok = slots.some(s => s.open <= timeStr && timeStr <= s.close);
+  if (!ok) {
+    const hrs = slots.map(s => `${s.open}–${s.close}`).join(', ');
+    return `Fuera de nuestro horario. Los ${dayEs} abrimos de ${hrs}.`;
+  }
+  return null;
+}
 
 const RESTAURANT_LAT = 41.4116;
 const RESTAURANT_LNG = 2.1751;
@@ -59,7 +84,7 @@ export default function Checkout() {
 
   const [step, setStep] = useState('form'); // 'form' | 'confirm'
   const [orderType, setOrderType] = useState('delivery');
-  const [form, setForm] = useState({ name: '', phone: '', street: '', floor: '', postalCode: '', pickupTime: '', notes: '' });
+  const [form, setForm] = useState({ name: '', phone: '', street: '', floor: '', postalCode: '', pickupTime: '', scheduledDate: '', scheduledTime: '', notes: '' });
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const [checkingAddress, setCheckingAddress] = useState(false);
@@ -68,6 +93,8 @@ export default function Checkout() {
   const [tipOption, setTipOption] = useState(0);
   const [customTip, setCustomTip] = useState('');
   const [confirmed, setConfirmed] = useState(false); // casilla de confirmación
+  const [paymentMethod, setPaymentMethod] = useState('card'); // 'card' | 'cash'
+  const [scheduleOrder, setScheduleOrder] = useState(false);
 
   // ─── Autocompletado de direcciones ─────────────────────────────────────────
   const [suggestions, setSuggestions] = useState([]);
@@ -80,6 +107,28 @@ export default function Checkout() {
 
   const { data: storeSettings } = useStoreSettings();
   const storeOpen = storeSettings?.store_open !== false;
+
+  // Fetch opening-hours schedule (no auth needed)
+  const { data: deliverySettings } = useQuery({
+    queryKey: ['deliverySettings'],
+    queryFn: async () => {
+      const res = await fetch('/api/adminSettings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getDeliverySettings' }),
+      });
+      const d = await res.json();
+      return d?.data ?? null;
+    },
+    staleTime: 60_000,
+  });
+
+  const scheduleError = useMemo(
+    () => scheduleOrder
+      ? validateScheduledTime(form.scheduledDate, form.scheduledTime, deliverySettings?.schedule)
+      : null,
+    [scheduleOrder, form.scheduledDate, form.scheduledTime, deliverySettings],
+  );
   const deliveryActive = storeSettings?.delivery_enabled !== false;
   const pickupActive = storeSettings?.pickup_enabled !== false;
   const settingsLoaded = !!storeSettings;
@@ -347,6 +396,18 @@ export default function Checkout() {
       toast({ title: 'Indica la hora aproximada de recogida', variant: 'destructive' });
       return;
     }
+    if (scheduleOrder && !form.scheduledDate.trim()) {
+      toast({ title: 'Selecciona la fecha del pedido programado', variant: 'destructive' });
+      return;
+    }
+    if (scheduleOrder && !form.scheduledTime.trim()) {
+      toast({ title: 'Selecciona la hora del pedido programado', variant: 'destructive' });
+      return;
+    }
+    if (scheduleOrder && scheduleError) {
+      toast({ title: 'Horario no disponible', description: scheduleError, variant: 'destructive' });
+      return;
+    }
     if (orderType === 'delivery' && !deliveryInfo) {
       const info = await checkDeliveryZone(selectedCoordsRef.current);
       if (!info) return;
@@ -371,11 +432,16 @@ export default function Checkout() {
     const finalTotal = subtotal + deliveryFeeToUse + tip;
 
     const orderItems = items.map(i => ({
-      menu_item_id: i.id,
+      menu_item_id: (i._originalItem || i).id,
       name: i.name,
       quantity: i.quantity,
       price: i.price,
-      removed_ingredients: i.removed_ingredients || [],
+      // flat list for display; per-flavor removals stored in flavors[]
+      removed_ingredients: i._flavors
+        ? i._flavors.flatMap(f => f.removed || [])
+        : (i.removed_ingredients || []),
+      flavors: i._flavors?.map(f => ({ id: f.id, name: f.name, removed: f.removed || [] })) || [],
+      extras: i._extras?.map(e => ({ id: e.id, name: e.name, price: e.price })) || [],
     }));
 
     // El piso/puerta se guarda en las notas para que la dirección quede limpia
@@ -398,7 +464,10 @@ export default function Checkout() {
       delivery_distance_km: distanceKm,
       tip,
       total: finalTotal,
-      payment_method: 'tarjeta',
+      payment_method: paymentMethod,
+      scheduled_for: scheduleOrder && form.scheduledDate && form.scheduledTime
+        ? `${form.scheduledDate} ${form.scheduledTime}`
+        : '',
       status: 'pending',
     };
 
@@ -412,6 +481,7 @@ export default function Checkout() {
       const result = json?.data;
       if (result?.id) {
         localStorage.setItem('orderId', result.id);
+        localStorage.setItem('mf_customer_phone', form.phone.trim());
         clearCart();
         navigate(`/seguimiento?orderId=${result.id}`);
       } else {
@@ -496,7 +566,14 @@ export default function Checkout() {
                 <p><span className="text-muted-foreground">Notas:</span> <span className="font-medium">{form.notes}</span></p>
               )}
               <p><span className="text-muted-foreground">Tipo:</span> <span className="font-medium">{orderType === 'delivery' ? '🛵 Delivery' : '🏠 Recogida en local'}</span></p>
-              <p><span className="text-muted-foreground">Pago:</span> <span className="font-medium">💳 Datáfono a domicilio</span></p>
+              {scheduleOrder && form.scheduledDate && form.scheduledTime && (
+                <p><span className="text-muted-foreground">Programado para:</span> <span className="font-medium">📅 {form.scheduledDate} · {form.scheduledTime}</span></p>
+              )}
+              <p><span className="text-muted-foreground">Pago:</span> <span className="font-medium">
+                {paymentMethod === 'card'
+                  ? (orderType === 'delivery' ? '💳 Datáfono a domicilio' : '💳 Datáfono en local')
+                  : '💵 Efectivo (importe exacto)'}
+              </span></p>
             </div>
           </div>
 
@@ -510,7 +587,7 @@ export default function Checkout() {
                     <span className="text-primary font-semibold">{(item.price * item.quantity).toFixed(2)} €</span>
                   </div>
                   {item.removed_ingredients?.length > 0 && (
-                    <p className="text-xs text-red-500 mt-0.5">Quitar: {item.removed_ingredients.map(r => r.replace(/^Sin /, '')).join(', ')}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Quitar: {item.removed_ingredients.map(r => r.replace(/^Sin /, '')).join(', ')}</p>
                   )}
                 </div>
               ))}
@@ -537,13 +614,29 @@ export default function Checkout() {
             </div>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
-            <CreditCard className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-blue-800 font-semibold text-sm">Pago con datáfono a domicilio</p>
-              <p className="text-blue-600 text-xs mt-0.5">El repartidor acudirá con un datáfono para realizar el cobro en el momento de la entrega.</p>
+          {paymentMethod === 'card' ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+              <CreditCard className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-blue-800 font-semibold text-sm">
+                  {orderType === 'delivery' ? 'Pago con datáfono a domicilio' : 'Pago con datáfono en el local'}
+                </p>
+                <p className="text-blue-600 text-xs mt-0.5">
+                  {orderType === 'delivery'
+                    ? 'El repartidor acudirá con un datáfono para realizar el cobro en el momento de la entrega.'
+                    : 'Podrás pagar con tarjeta al recoger tu pedido en el local.'}
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+              <Banknote className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-amber-800 font-semibold text-sm">Pago en efectivo · importe exacto</p>
+                <p className="text-amber-700 text-xs mt-0.5">Por favor, prepara el importe exacto de <strong>{finalTotal.toFixed(2)} €</strong>. No disponemos de cambio.</p>
+              </div>
+            </div>
+          )}
 
           <label className="flex items-start gap-3 cursor-pointer mb-6 p-4 bg-muted/40 rounded-2xl border border-border">
             <input
@@ -610,11 +703,11 @@ export default function Checkout() {
           </div>
         )}
         {settingsLoaded && !deliveryActive && !pickupActive && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-red-800 text-sm">No hay opciones disponibles</p>
-              <p className="text-red-600 text-xs mt-0.5">Tanto el delivery como la recogida están temporalmente cerrados. Disculpa las molestias.</p>
+              <p className="font-semibold text-amber-800 text-sm">No hay opciones disponibles</p>
+              <p className="text-amber-700 text-xs mt-0.5">Tanto el delivery como la recogida están temporalmente cerrados. Disculpa las molestias.</p>
             </div>
           </div>
         )}
@@ -802,6 +895,62 @@ export default function Checkout() {
               </div>
             )}
 
+            {/* C3 — Programar pedido para más tarde */}
+            <div className="bg-card rounded-2xl border border-border/50 p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scheduleOrder}
+                  onChange={e => setScheduleOrder(e.target.checked)}
+                  className="w-4 h-4 accent-primary flex-shrink-0"
+                />
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">Programar para más tarde</span>
+                </div>
+              </label>
+              {scheduleOrder && (
+                <div className="mt-4 space-y-3 pl-7">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="scheduledDate" className="text-xs">Fecha *</Label>
+                      <Input
+                        id="scheduledDate"
+                        type="date"
+                        value={form.scheduledDate}
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={e => updateField('scheduledDate', e.target.value)}
+                        className="rounded-xl mt-1"
+                        required={scheduleOrder}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="scheduledTime" className="text-xs">Hora *</Label>
+                      <Input
+                        id="scheduledTime"
+                        type="time"
+                        value={form.scheduledTime}
+                        onChange={e => updateField('scheduledTime', e.target.value)}
+                        className="rounded-xl mt-1"
+                        required={scheduleOrder}
+                      />
+                    </div>
+                  </div>
+                  {scheduleError ? (
+                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3">
+                      <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700 font-medium">{scheduleError}</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <Clock className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-700">El horario es aproximado. Te llamaremos si hay algún cambio.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div>
               <Label htmlFor="notes">Notas (opcional)</Label>
               <Textarea id="notes" placeholder="Alergias, instrucciones de entrega, sabores adicionales en pizza..." value={form.notes} onChange={e => updateField('notes', e.target.value)} className="rounded-xl mt-1.5" rows={3} />
@@ -831,14 +980,42 @@ export default function Checkout() {
             )}
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-            <div className="flex items-start gap-3">
-              <CreditCard className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-heading font-semibold text-blue-800">Pago con datáfono a domicilio</p>
-                <p className="text-blue-600 text-sm mt-1">El repartidor acudirá con un datáfono para realizar el cobro en el momento de la entrega.</p>
-              </div>
+          {/* C4 — Payment method selector */}
+          <div className="bg-card rounded-2xl border border-border/50 p-5">
+            <h2 className="font-heading font-semibold text-sm mb-3">Método de pago</h2>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('card')}
+                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'card' ? 'border-primary bg-primary/5' : 'border-border bg-background hover:border-primary/40'}`}
+              >
+                <CreditCard className={`w-5 h-5 ${paymentMethod === 'card' ? 'text-primary' : 'text-muted-foreground'}`} />
+                <span className={`text-sm font-semibold ${paymentMethod === 'card' ? 'text-primary' : 'text-foreground'}`}>Datáfono</span>
+                <span className="text-xs text-muted-foreground text-center leading-tight">Tarjeta al recibir el pedido</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('cash')}
+                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-amber-500 bg-amber-50' : 'border-border bg-background hover:border-amber-300'}`}
+              >
+                <Banknote className={`w-5 h-5 ${paymentMethod === 'cash' ? 'text-amber-600' : 'text-muted-foreground'}`} />
+                <span className={`text-sm font-semibold ${paymentMethod === 'cash' ? 'text-amber-700' : 'text-foreground'}`}>Efectivo</span>
+                <span className="text-xs text-muted-foreground text-center leading-tight">Solo importe exacto, sin cambio</span>
+              </button>
             </div>
+            {paymentMethod === 'card' && (
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                {orderType === 'delivery' ? 'El repartidor acude con datáfono. Se cobra al entregar.' : 'Paga con tarjeta al recoger tu pedido.'}
+              </p>
+            )}
+            {paymentMethod === 'cash' && (
+              <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">
+                  Por favor, prepara el importe exacto de <strong>{finalTotal.toFixed(2)} €</strong>. No disponemos de cambio.
+                </p>
+              </div>
+            )}
           </div>
 
           <Button

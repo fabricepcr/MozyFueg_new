@@ -228,8 +228,8 @@ export default function TrackOrder() {
     return (
       <div className="min-h-screen bg-background font-body flex items-center justify-center p-6">
         <div className="max-w-sm w-full text-center">
-          <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-red-100 flex items-center justify-center">
-            <XCircle className="w-11 h-11 text-red-500" />
+          <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-slate-100 flex items-center justify-center">
+            <XCircle className="w-11 h-11 text-slate-400" />
           </div>
           <h1 className="font-heading text-2xl font-bold text-foreground mb-2">Pedido cancelado</h1>
           <p className="text-muted-foreground text-sm mb-1">
@@ -407,7 +407,11 @@ export default function TrackOrder() {
 
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CreditCard className="w-4 h-4 flex-shrink-0 text-primary" />
-            <span>{order.payment_method === 'datafono' ? 'Datáfono a domicilio' : order.payment_method === 'efectivo' ? 'Efectivo' : order.payment_method === 'bizum' ? 'Bizum' : 'Tarjeta'}</span>
+            <span>{
+              order.payment_method === 'datafono' || order.payment_method === 'card' ? 'Datáfono' :
+              order.payment_method === 'efectivo' || order.payment_method === 'cash' ? 'Efectivo' :
+              order.payment_method === 'bizum' ? 'Bizum' : 'Tarjeta'
+            }</span>
           </div>
 
           <div className="border-t pt-3">
@@ -428,6 +432,13 @@ export default function TrackOrder() {
               ✅ Entregado a las {new Date(order.delivered_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
             </p>
           )}
+        </div>
+
+        {/* Link to order history */}
+        <div className="mt-4 text-center">
+          <a href="/mis-pedidos" className="text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4">
+            Ver historial de pedidos
+          </a>
         </div>
       </div>
     </div>

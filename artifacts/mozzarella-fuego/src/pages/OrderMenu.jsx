@@ -139,11 +139,11 @@ export default function OrderMenu() {
 
       {!storeOpen && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-red-800">Restaurante cerrado</p>
-              <p className="text-red-600 text-sm mt-0.5">No estamos aceptando pedidos en este momento. Vuelve pronto.</p>
+              <p className="font-semibold text-amber-800">Restaurante cerrado</p>
+              <p className="text-amber-700 text-sm mt-0.5">No estamos aceptando pedidos en este momento. Vuelve pronto.</p>
             </div>
           </div>
         </div>
@@ -173,11 +173,11 @@ export default function OrderMenu() {
       )}
       {storeOpen && !deliveryActive && !pickupActive && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-red-800">Sin servicio disponible</p>
-              <p className="text-red-600 text-sm mt-0.5">Tanto el delivery como la recogida están temporalmente cerrados. Disculpa las molestias.</p>
+              <p className="font-semibold text-amber-800">Sin servicio disponible</p>
+              <p className="text-amber-700 text-sm mt-0.5">Tanto el delivery como la recogida están temporalmente cerrados. Disculpa las molestias.</p>
             </div>
           </div>
         </div>
@@ -203,12 +203,16 @@ export default function OrderMenu() {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+        <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 flex items-start gap-3">
           <span className="text-xl flex-shrink-0">🍕</span>
           <div>
-            <p className="font-semibold text-amber-900 text-sm">¿Quieres pizzas de varios sabores?</p>
-            <p className="text-amber-700 text-xs mt-0.5">Selecciona el sabor más caro entre los que quieras y añade los demás sabores en el campo de <strong>notas del pedido</strong>. ¡Así podemos preparar tu pizza a medida!</p>
-            <p className="text-amber-700 text-xs mt-1">🍕 <strong>Pizza 24cm:</strong> máximo 2 sabores · <strong>Pizza 33cm:</strong> máximo 4 sabores.</p>
+            <p className="font-semibold text-foreground text-sm">¿Quieres mezclar sabores?</p>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              Al añadir una pizza puedes elegir <strong>hasta 2 sabores en 24&nbsp;cm</strong> o <strong>hasta 4 en 33&nbsp;cm</strong> — directamente en el configurador. El precio será el del sabor más caro.
+            </p>
+            <p className="text-muted-foreground text-xs mt-1">
+              ⚠️ <strong>No mezclamos sabores dulces y salados</strong> en la misma pizza.
+            </p>
           </div>
         </div>
       </div>

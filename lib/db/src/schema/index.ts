@@ -64,6 +64,42 @@ export const deliverySettingsTable = pgTable("delivery_settings", {
   updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+export const projetoTasksTable = pgTable("projeto_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull().unique(),
+  epic_letter: text("epic_letter").notNull(),
+  epic_name: text("epic_name").notNull(),
+  title: text("title").notNull(),
+  scope: text("scope").default(""),
+  status: text("status").notNull().default("a_fazer"),
+  needs_info: boolean("needs_info").default(false),
+  sort_order: integer("sort_order").default(0),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const projetoChecklistTable = pgTable("projeto_checklist", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  task_id: uuid("task_id").notNull(),
+  text: text("text").notNull(),
+  checked: boolean("checked").default(false),
+  sort_order: integer("sort_order").default(0),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const toppingsTable = pgTable("toppings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  price_full: numeric("price_full", { precision: 10, scale: 2 }).notNull().default("0"),
+  price_half: numeric("price_half", { precision: 10, scale: 2 }).notNull().default("0"),
+  price_quarter: numeric("price_quarter", { precision: 10, scale: 2 }).notNull().default("0"),
+  available: boolean("available").notNull().default(true),
+  sort_order: integer("sort_order").notNull().default(0),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const reservationsTable = pgTable("reservations", {
   id: uuid("id").primaryKey().defaultRandom(),
   customer_name: text("customer_name").notNull().default(""),

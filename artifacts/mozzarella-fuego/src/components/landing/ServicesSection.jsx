@@ -29,25 +29,25 @@ const cards = [
   icon: Pizza,
   emoji: null,
   title: 'Rodízio · Buffet libre',
-  color: 'from-red-50 to-rose-50',
-  border: 'border-red-200',
+  color: 'from-green-50 to-emerald-50',
+  border: 'border-green-200',
   iconBg: 'bg-primary/10 text-primary',
   featured: true,
   content:
   <div className="space-y-3 text-muted-foreground text-sm leading-relaxed">
         <p>Nuestros camareros pasan por tu mesa con <strong className="text-foreground">diferentes variedades de pizzas recién hechas</strong>. Elige los sabores que más te gusten.</p>
         <div className="grid grid-cols-2 gap-2">
-          <div className="bg-white/70 rounded-xl p-2.5 border border-red-100 text-center">
+          <div className="bg-white/70 rounded-xl p-2.5 border border-green-100 text-center">
             <p className="text-xs font-bold text-foreground">19:00 – 21:00</p>
             <p className="text-xs text-muted-foreground mt-0.5">Vie-Dom
 </p>
           </div>
-          <div className="bg-white/70 rounded-xl p-2.5 border border-red-100 text-center">
+          <div className="bg-white/70 rounded-xl p-2.5 border border-green-100 text-center">
             <p className="text-xs font-bold text-foreground">21:30 – 23:30</p>
             <p className="text-xs text-muted-foreground mt-0.5">Vie–Dom</p>
           </div>
         </div>
-        <div className="bg-white/70 rounded-xl p-3 border border-red-100">
+        <div className="bg-white/70 rounded-xl p-3 border border-green-100">
           <p className="font-semibold text-foreground text-xs uppercase tracking-wide mb-2">Precios</p>
           <div className="space-y-1 text-xs">
             <div className="flex justify-between"><span>Adultos y mayores de 11 años</span><span className="font-bold text-foreground">25 €</span></div>

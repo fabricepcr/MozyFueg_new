@@ -1,60 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '@/lib/db';
-import { CheckCircle, Loader2, Clock, CreditCard } from 'lucide-react';
+import { CheckCircle, Loader2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function OrderConfirmed() {
   const urlParams = new URLSearchParams(window.location.search);
-  const rawOrderId = urlParams.get('orderId');
-  const isStripe = urlParams.get('stripe') === '1';
-  // Cuando viene de Stripe, orderId es en realidad el stripe_session_id
-  const orderId = isStripe ? null : rawOrderId;
-  const sessionId = isStripe ? rawOrderId : urlParams.get('session_id');
+  const orderId = urlParams.get('orderId');
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!orderId) { setLoading(false); return; }
     const load = async () => {
-      if (orderId) {
-        for (let i = 0; i < 5; i++) {
-          const data = await db.selectOne('orders', { id: orderId }).catch(() => null);
-          if (data) { setOrder(data); localStorage.setItem('orderId', data.id); break; }
-          await new Promise(r => setTimeout(r, 1500));
-        }
-        setLoading(false);
-        return;
+      for (let i = 0; i < 5; i++) {
+        const data = await db.selectOne('orders', { id: orderId }).catch(() => null);
+        if (data) { setOrder(data); localStorage.setItem('orderId', data.id); break; }
+        await new Promise(r => setTimeout(r, 1500));
       }
-
-      if (sessionId) {
-        for (let i = 0; i < 10; i++) {
-          const data = await db.selectOne('orders', { stripe_session_id: sessionId }).catch(() => null);
-          if (data) { setOrder(data); localStorage.setItem('orderId', data.id); break; }
-          await new Promise(r => setTimeout(r, 2000));
-        }
-        setLoading(false);
-        return;
-      }
-
       setLoading(false);
     };
-
     load();
-  }, [orderId, sessionId]);
+  }, [orderId]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <p className="text-muted-foreground text-sm">
-          {sessionId ? 'Confirmando tu pago y pedido...' : 'Confirmando tu pedido...'}
-        </p>
+        <p className="text-muted-foreground text-sm">Confirmando tu pedido...</p>
       </div>
     );
   }
-
-  const resolvedOrderId = order?.id || orderId;
 
   return (
     <div className="min-h-screen bg-background font-body flex items-center justify-center p-4">
@@ -76,22 +53,12 @@ export default function OrderConfirmed() {
             ) : (
               <p className="text-sm text-muted-foreground">Entrega a: {order.customer_address}</p>
             )}
-            {order.payment_method === 'tarjeta' && (
-              <p className="text-xs text-green-700 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5" /> Pago con tarjeta confirmado
-              </p>
-            )}
             <p className="text-sm font-bold text-primary">{order.total?.toFixed(2)} €</p>
           </div>
         )}
-        {!order && sessionId && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-6 text-sm text-yellow-800">
-            Tu pago fue procesado correctamente. El pedido se confirmará en breve.
-          </div>
-        )}
         <div className="flex flex-col gap-3">
-          {resolvedOrderId && (
-            <Link to={`/seguimiento?orderId=${resolvedOrderId}`}>
+          {orderId && (
+            <Link to={`/seguimiento?orderId=${orderId}`}>
               <Button variant="outline" className="rounded-xl w-full">Seguir mi pedido en tiempo real</Button>
             </Link>
           )}

@@ -6,9 +6,6 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
-// Raw body required for Stripe webhook signature verification — must be before express.json()
-app.use("/api/stripeWebhook", express.raw({ type: "application/json" }));
-
 app.use(
   pinoHttp({
     logger,
