@@ -10,6 +10,7 @@ const EMPTY = {
   available: true,
   price_full_33cm: '',
   price_half_33cm: '',
+  price_third_33cm: '',
   price_quarter_33cm: '',
   price_full_24cm: '',
   price_half_24cm: '',
@@ -18,6 +19,7 @@ const EMPTY = {
 const PRICE_FIELDS = [
   { key: 'price_full_33cm',    label: 'Entera 33cm'   },
   { key: 'price_half_33cm',    label: 'Media 33cm'    },
+  { key: 'price_third_33cm',   label: 'Tercio 33cm'   },
   { key: 'price_quarter_33cm', label: 'Cuarto 33cm'   },
   { key: 'price_full_24cm',    label: 'Entera 24cm'   },
   { key: 'price_half_24cm',    label: 'Media 24cm'    },
@@ -61,6 +63,7 @@ export default function ToppingsPanel() {
       available:          t.available !== false,
       price_full_33cm:    t.price_full_33cm ?? '',
       price_half_33cm:    t.price_half_33cm ?? '',
+      price_third_33cm:   t.price_third_33cm ?? '',
       price_quarter_33cm: t.price_quarter_33cm ?? '',
       price_full_24cm:    t.price_full_24cm ?? '',
       price_half_24cm:    t.price_half_24cm ?? '',
@@ -82,6 +85,7 @@ export default function ToppingsPanel() {
         available:          form.available,
         price_full_33cm:    form.price_full_33cm    !== '' ? parseFloat(form.price_full_33cm)    : null,
         price_half_33cm:    form.price_half_33cm    !== '' ? parseFloat(form.price_half_33cm)    : null,
+        price_third_33cm:   form.price_third_33cm   !== '' ? parseFloat(form.price_third_33cm)   : null,
         price_quarter_33cm: form.price_quarter_33cm !== '' ? parseFloat(form.price_quarter_33cm) : null,
         price_full_24cm:    form.price_full_24cm    !== '' ? parseFloat(form.price_full_24cm)    : null,
         price_half_24cm:    form.price_half_24cm    !== '' ? parseFloat(form.price_half_24cm)    : null,
@@ -292,7 +296,7 @@ export default function ToppingsPanel() {
               </div>
 
               {/* Price grid */}
-              <div className="mt-2 grid grid-cols-5 gap-1">
+              <div className="mt-2 grid grid-cols-6 gap-1">
                 {PRICE_FIELDS.map(({ key, label }) => (
                   <div key={key} className="text-center">
                     <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>

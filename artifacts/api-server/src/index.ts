@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { runImageUrlMigration } from "./lib/imageMigration";
 import { runToppingsPriceMigration } from "./lib/toppingsMigration";
+import { runPizzaPriceMigration } from "./lib/pizzaPriceMigration";
 
 const rawPort = process.env["PORT"];
 
@@ -33,5 +34,10 @@ app.listen(port, (err) => {
   // One-time migration: update topping prices from 2026-08 pricing sheet
   runToppingsPriceMigration().catch((e) =>
     logger.error({ err: e }, "Toppings price migration failed")
+  );
+
+  // One-time migration: populate 24cm pizza prices where still NULL
+  runPizzaPriceMigration().catch((e) =>
+    logger.error({ err: e }, "Pizza price migration failed")
   );
 });

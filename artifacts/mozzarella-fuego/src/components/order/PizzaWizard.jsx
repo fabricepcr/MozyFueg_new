@@ -19,6 +19,7 @@ const MF_SIZES = [
 const DIVISIONS = [
   { id: 'entera', label: 'Entera',        count: 1, description: '1 sabor',   maxSizes: ['24cm','33cm'] },
   { id: 'mitad',  label: 'Mitad y Mitad', count: 2, description: '2 sabores', maxSizes: ['24cm','33cm'] },
+  { id: 'tres',   label: '3 Sabores',     count: 3, description: '3 sabores', maxSizes: ['33cm'] },
   { id: 'cuatro', label: '4 Sabores',     count: 4, description: '4 sabores', maxSizes: ['33cm'] },
 ];
 
@@ -37,12 +38,13 @@ const STEP_LABELS  = {
 // ── Topping price key based on size + portion count ───────────────────────
 function priceKeyFor(count, size) {
   if (size === '24cm') {
-    // 24cm has no quarter tier — half covers divided portions
+    // 24cm has no third/quarter tier — half covers divided portions
     return count === 1 ? 'price_full_24cm' : 'price_half_24cm';
   }
   // 33cm
   if (count === 1) return 'price_full_33cm';
   if (count === 2) return 'price_half_33cm';
+  if (count === 3) return 'price_third_33cm';
   return 'price_quarter_33cm';
 }
 
@@ -76,6 +78,11 @@ function DecorationPizza({ count, size = 80, selected }) {
       <circle cx={cx} cy={cy} r={ro} fill="#d4a853" />
       <circle cx={cx} cy={cy} r={ri} fill={selected ? 'hsl(142 52% 96%)' : '#fdf6e3'} />
       {count === 2 && <line x1={cx} y1={cy - ri} x2={cx} y2={cy + ri} stroke="white" strokeWidth={lw} strokeLinecap="round" />}
+      {count === 3 && <>
+        <line x1={cx} y1={cy} x2={cx}                    y2={cy - ri}           stroke="white" strokeWidth={lw} strokeLinecap="round" />
+        <line x1={cx} y1={cy} x2={cx + ri * 0.866} y2={cy + ri * 0.5} stroke="white" strokeWidth={lw} strokeLinecap="round" />
+        <line x1={cx} y1={cy} x2={cx - ri * 0.866} y2={cy + ri * 0.5} stroke="white" strokeWidth={lw} strokeLinecap="round" />
+      </>}
       {count === 4 && <>
         <line x1={cx} y1={cy - ri} x2={cx} y2={cy + ri} stroke="white" strokeWidth={lw} strokeLinecap="round" />
         <line x1={cx - ri} y1={cy} x2={cx + ri} y2={cy} stroke="white" strokeWidth={lw} strokeLinecap="round" />
@@ -250,6 +257,7 @@ function FlavorPickerPanel({ slot, pizzaOptions, flavors, selectedSize, onPick, 
 const PRICE_KEY_LABELS = {
   price_full_33cm:    'pizza entera (33cm)',
   price_half_33cm:    'media pizza (33cm)',
+  price_third_33cm:   'tercio de pizza (33cm)',
   price_quarter_33cm: 'cuarto de pizza (33cm)',
   price_full_24cm:    'pizza entera (24cm)',
   price_half_24cm:    'media pizza (24cm)',
@@ -417,8 +425,8 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
 
   const handleSizeSelect = (sizeId) => {
     setSelectedSize(sizeId);
-    // reset 4-sabores division if switching to 24cm
-    if (sizeId === '24cm' && division?.count === 4) {
+    // reset 3- and 4-sabores division if switching to 24cm
+    if (sizeId === '24cm' && (division?.count === 3 || division?.count === 4)) {
       setDivision(null);
       setFlavors(Array(4).fill(null).map((_, i) => i === 0 ? { item } : null));
       setFlavorToppings(Array(4).fill(null).map(() => []));
@@ -628,7 +636,7 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
                   </p>
                   <p className="text-xs text-muted-foreground/70 mb-5">
                     Los precios se calculan por tu{' '}
-                    {flavorCount === 1 ? 'pizza entera' : flavorCount === 2 ? 'media pizza' : 'cuarto de pizza'}.
+                    {flavorCount === 1 ? 'pizza entera' : flavorCount === 2 ? 'media pizza' : flavorCount === 3 ? 'tercio de pizza' : 'cuarto de pizza'}.
                   </p>
 
                   <div className="space-y-3">

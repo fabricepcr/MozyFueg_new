@@ -1063,24 +1063,24 @@ router.post('/admin/toppings', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const {
       name, available = true,
-      price_full_33cm, price_half_33cm, price_quarter_33cm,
+      price_full_33cm, price_half_33cm, price_third_33cm, price_quarter_33cm,
       price_full_24cm, price_half_24cm,
     } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Nombre requerido' });
     const { rows } = await pool.query(
       `INSERT INTO "toppings"
          (name, available,
-          price_full_33cm, price_half_33cm, price_quarter_33cm,
+          price_full_33cm, price_half_33cm, price_third_33cm, price_quarter_33cm,
           price_full_24cm, price_half_24cm,
           price_full, price_half, price_quarter,
           sort_order, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$3,$4,$5,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$3,$4,$6,
                (SELECT COALESCE(MAX(sort_order),0)+1 FROM toppings),
                NOW(),NOW())
        RETURNING *`,
       [
         name.trim(), available,
-        price_full_33cm ?? null, price_half_33cm ?? null, price_quarter_33cm ?? null,
+        price_full_33cm ?? null, price_half_33cm ?? null, price_third_33cm ?? null, price_quarter_33cm ?? null,
         price_full_24cm ?? null, price_half_24cm ?? null,
       ],
     );
@@ -1097,7 +1097,7 @@ router.patch('/admin/toppings/:id', async (req, res) => {
     const { id } = req.params;
     const allowed = [
       'name', 'available',
-      'price_full_33cm', 'price_half_33cm', 'price_quarter_33cm',
+      'price_full_33cm', 'price_half_33cm', 'price_third_33cm', 'price_quarter_33cm',
       'price_full_24cm', 'price_half_24cm',
     ];
     const updates: string[] = [];

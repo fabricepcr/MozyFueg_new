@@ -19,13 +19,19 @@ export async function runToppingsPriceMigration(): Promise<void> {
     logger.info('Running toppings migration: adding size-specific price columns');
     await pool.query(`
       ALTER TABLE toppings
-        ADD COLUMN IF NOT EXISTS price_full_33cm   NUMERIC,
-        ADD COLUMN IF NOT EXISTS price_half_33cm   NUMERIC,
+        ADD COLUMN IF NOT EXISTS price_full_33cm    NUMERIC,
+        ADD COLUMN IF NOT EXISTS price_half_33cm    NUMERIC,
+        ADD COLUMN IF NOT EXISTS price_third_33cm   NUMERIC,
         ADD COLUMN IF NOT EXISTS price_quarter_33cm NUMERIC,
-        ADD COLUMN IF NOT EXISTS price_full_24cm   NUMERIC,
-        ADD COLUMN IF NOT EXISTS price_half_24cm   NUMERIC
+        ADD COLUMN IF NOT EXISTS price_full_24cm    NUMERIC,
+        ADD COLUMN IF NOT EXISTS price_half_24cm    NUMERIC
     `);
   }
+
+  // Ensure price_third_33cm column exists (added after initial migration)
+  await pool.query(`
+    ALTER TABLE toppings ADD COLUMN IF NOT EXISTS price_third_33cm NUMERIC
+  `);
 
   // Rename Ternera → Tiras de ternera if still present
   await pool.query(
@@ -77,6 +83,20 @@ export async function runToppingsPriceMigration(): Promise<void> {
         WHEN 'Salsa barbacoa'       THEN 1.00  WHEN 'Tiras de ternera'     THEN 2.00
         WHEN 'Tomate cherry'        THEN 1.00  WHEN 'Tomate seco'          THEN 1.50
         ELSE price_quarter_33cm END,
+      price_third_33cm   = CASE name
+        WHEN 'Aceitunas negras'     THEN 0.80  WHEN 'Aceitunas verdes'     THEN 0.80
+        WHEN 'Atún'                 THEN 1.80  WHEN 'Bacon'                THEN 2.00
+        WHEN 'Cebolla caramelizada' THEN 1.20  WHEN 'Cebolla morada'       THEN 1.20
+        WHEN 'Champiñones'          THEN 1.50  WHEN 'Cheddar'              THEN 1.50
+        WHEN 'Chorizo ibérico'      THEN 2.00  WHEN 'Gorgonzola'           THEN 1.50
+        WHEN 'Huevo cocido'         THEN 1.50  WHEN 'Jamón dulce'          THEN 1.50
+        WHEN 'Maíz dulce'           THEN 1.20  WHEN 'Mozzarella extra'     THEN 1.80
+        WHEN 'Pepperoni'            THEN 1.80  WHEN 'Pimiento verde'       THEN 1.20
+        WHEN 'Piña'                 THEN 1.20  WHEN 'Pollo'                THEN 2.50
+        WHEN 'Provolone'            THEN 1.80  WHEN 'Rúcula'               THEN 1.20
+        WHEN 'Salsa barbacoa'       THEN 1.20  WHEN 'Tiras de ternera'     THEN 2.50
+        WHEN 'Tomate cherry'        THEN 1.20  WHEN 'Tomate seco'          THEN 1.80
+        ELSE price_third_33cm END,
       price_full_24cm    = CASE name
         WHEN 'Aceitunas negras'     THEN 1.50  WHEN 'Aceitunas verdes'     THEN 1.50
         WHEN 'Atún'                 THEN 2.50  WHEN 'Bacon'                THEN 3.00
