@@ -5,30 +5,30 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchMenuItems } from '@/lib/api';
 import { getRemovableIngredients, getSweetPizzaIngredients } from '@/lib/pizzaIngredients';
 
-// ── Extras catalogue (name, price-24cm, price-33cm) ─────────────────────────
+// ── Extras catalogue [name, full_33cm, half_33cm, quarter_33cm, full_24cm, half_24cm] ───
 const ALL_EXTRAS = [
-  ['Aceite de albahaca', 1.0, 2.0], ['Aceite de trufa', 2.0, 2.5],
-  ['Aceitunas negras', 1.0, 1.5], ['Aceitunas verdes', 1.0, 1.5],
-  ['Alcaparras', 1.0, 1.5], ['Alioli', 1.5, 2.0],
-  ['Anchoas', 3.0, 3.5], ['Atún', 2.0, 2.5],
-  ['Bacon', 2.0, 2.5], ['Banana', 1.0, 1.5],
-  ['Brócoli', 1.0, 1.5], ['Butifarra del pagés', 3.0, 3.5],
-  ['Calabresa', 4.0, 4.5], ['Catupiry', 3.0, 3.5],
-  ['Cebolla caramelizada', 2.0, 2.5], ['Cebolla frita', 1.5, 2.0],
-  ['Cebolla morada', 1.0, 1.5], ['Champiñones', 2.0, 2.5],
-  ['Cheddar', 2.0, 2.5], ['Chorizo ibérico', 3.5, 4.0],
-  ['Doritos', 3.0, 3.5], ['Fresas', 2.0, 2.5],
-  ['Gorgonzola', 2.0, 2.5], ['Grana padano', 2.0, 2.5],
-  ['Guisantes', 1.0, 1.5], ['Huevo cocido', 2.0, 2.5],
-  ['Jamón dulce', 2.0, 2.5], ['Maíz dulce', 1.0, 1.5],
-  ["M&M's", 2.5, 3.0], ['Mozzarella extra', 2.0, 2.5],
-  ['Pepperoni', 2.0, 2.5], ['Perlas de mozzarella', 3.0, 3.5],
-  ['Piña', 1.0, 1.5], ['Pimiento verde', 1.0, 1.5],
-  ['Pollo', 4.0, 4.5], ['Provolone', 2.0, 2.5],
-  ['Rúcula', 1.0, 1.5], ['Ruffles', 3.0, 3.5],
-  ['Salsa barbacoa', 1.5, 2.0], ['Ternera', 4.0, 4.5],
-  ['Tomate cherry', 1.0, 1.5], ['Tomate seco', 2.0, 2.5],
-  ['Uvas', 1.5, 2.0],
+  ['Aceite de albahaca', 2.0, 1.2, 0.8, 1.0, 0.6], ['Aceite de trufa', 2.5, 1.5, 0.9, 2.0, 1.2],
+  ['Aceitunas negras', 2.0, 1.0, 0.5, 1.5, 0.8], ['Aceitunas verdes', 2.0, 1.0, 0.5, 1.5, 0.8],
+  ['Alcaparras', 1.5, 1.0, 0.5, 1.0, 0.6], ['Alioli', 2.0, 1.2, 0.8, 1.5, 0.9],
+  ['Anchoas', 3.5, 2.0, 1.0, 3.0, 1.5], ['Atún', 3.0, 2.0, 1.5, 2.5, 1.5],
+  ['Bacon', 4.0, 3.0, 1.5, 3.0, 2.0], ['Banana', 1.5, 1.0, 0.5, 1.0, 0.6],
+  ['Brócoli', 2.5, 1.5, 1.0, 2.0, 1.5], ['Butifarra del pagés', 3.5, 2.0, 1.0, 3.0, 1.5],
+  ['Calabresa', 5.0, 3.5, 2.0, 4.0, 2.5], ['Catupiry', 4.0, 3.0, 1.5, 3.0, 2.0],
+  ['Cebolla caramelizada', 2.5, 1.5, 1.0, 2.0, 1.5], ['Cebolla frita', 3.0, 2.0, 1.5, 2.0, 1.5],
+  ['Cebolla morada', 2.0, 1.5, 1.0, 1.5, 1.0], ['Champiñones', 3.0, 2.0, 1.0, 2.5, 1.5],
+  ['Cheddar', 3.0, 2.0, 1.0, 2.5, 1.5], ['Chorizo ibérico', 4.0, 3.0, 1.5, 3.0, 2.0],
+  ['Doritos', 3.5, 2.0, 1.0, 3.0, 1.5], ['Fresas', 2.5, 1.5, 0.9, 2.0, 1.2],
+  ['Gorgonzola', 3.0, 2.0, 1.0, 2.5, 1.5], ['Grana padano', 2.5, 1.5, 0.9, 2.0, 1.2],
+  ['Guisantes', 1.5, 1.0, 0.5, 1.0, 0.6], ['Huevo cocido', 3.0, 2.0, 1.0, 2.5, 1.5],
+  ['Jamón dulce', 3.0, 2.0, 1.0, 2.5, 1.5], ['Maíz dulce', 2.0, 1.5, 1.0, 1.5, 1.0],
+  ["M&M's", 3.0, 2.0, 1.5, 2.0, 1.5], ['Mozzarella extra', 3.0, 2.0, 1.5, 2.5, 1.5],
+  ['Pepperoni', 3.0, 2.0, 1.5, 2.0, 1.5], ['Perlas de mozzarella', 3.5, 2.0, 1.0, 3.0, 1.5],
+  ['Piña', 2.0, 1.5, 1.0, 1.5, 1.0], ['Pimiento verde', 2.0, 1.5, 1.0, 1.5, 1.0],
+  ['Pollo', 5.0, 3.5, 2.0, 3.0, 2.0], ['Provolone', 3.0, 2.0, 1.5, 2.5, 1.5],
+  ['Rúcula', 2.0, 1.5, 1.0, 1.5, 1.0], ['Ruffles', 3.5, 2.0, 1.0, 3.0, 1.5],
+  ['Salsa barbacoa', 2.0, 1.5, 1.0, 1.5, 1.0], ['Tiras de ternera', 5.0, 3.5, 2.0, 3.0, 2.0],
+  ['Tomate cherry', 2.0, 1.5, 1.0, 1.5, 1.0], ['Tomate seco', 3.0, 2.0, 1.5, 2.0, 1.5],
+  ['Uvas', 2.0, 1.2, 0.8, 1.5, 0.9],
 ];
 
 const MAX_EXTRAS = 3;
@@ -163,18 +163,17 @@ export default function PizzaCustomizerModal({ item, onClose, onConfirm, initial
   }, [pizzaOptions, flavorSearch]);
 
   // ── Price (B4: base = most expensive chosen flavor) ────────────────────────
-  const priceIdx = selectedSize === '24cm' ? 0 : 1;
   const basePrice = flavors.length
     ? Math.max(...flavors.map(f => flavorPrice(f.item, selectedSize)))
     : flavorPrice(item, selectedSize);
 
   const extrasWithPrice = useMemo(() =>
-    ALL_EXTRAS.map(([name, p23, p33]) => ({
+    ALL_EXTRAS.map(([name, full33, , , full24]) => ({
       id: name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
       name,
-      price: priceIdx === 0 ? p23 : p33,
+      price: selectedSize === '24cm' ? full24 : full33,
     })),
-    [priceIdx]
+    [selectedSize]
   );
   const filteredExtras = useMemo(() => {
     const q = search.trim().toLowerCase();

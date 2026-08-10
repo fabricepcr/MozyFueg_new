@@ -52,6 +52,10 @@ const SUPABASE_TO_OBJECT_STORAGE: Record<string, string> = {
   'Sprite':                   '/api/storage/objects/uploads/f6a98179-4c1a-4974-bd88-257d687e29be',
   // M&Ms stored with literal & in DB (not URL-encoded)
   'Pizza M&Ms':               '/api/storage/objects/uploads/dc35e70c-a0f1-4386-a5ce-24b1e64a6ddb',
+  'Pizza Campera':            '/api/storage/objects/uploads/5907a7d2-a02b-45d2-ac60-e76e88c428ab',
+  'Pizza Frango Catupiry':    '/api/storage/objects/uploads/b94f4374-a64f-46ce-96b0-285657c155c6',
+  'Pizza La Mafia':           '/api/storage/objects/uploads/d6563762-5f86-44e8-83dd-4fb37fa601b7',
+  'Pizza Pepperoni':          '/api/storage/objects/uploads/7f2db96e-99ef-4069-a5f3-920f26b3c207',
 };
 
 export async function runImageUrlMigration(): Promise<void> {

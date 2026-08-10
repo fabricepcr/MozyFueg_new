@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Pencil, Trash2, X, Check, Eye, EyeOff, Upload, Loader2 } from 'lucide-react';
+import ToppingsPanel from './ToppingsPanel';
 
 const CATEGORIES = [
   { value: 'pizzas',        label: '🍕 Pizzas' },
@@ -21,6 +22,7 @@ const EMPTY_FORM = {
 
 export default function AdminMenu() {
   const queryClient = useQueryClient();
+  const [tab, setTab]               = useState('productos'); // 'productos' | 'toppings'
   const [showForm, setShowForm]     = useState(false);
   const [editing, setEditing]       = useState(null);
   const [form, setForm]             = useState(EMPTY_FORM);
@@ -180,6 +182,31 @@ export default function AdminMenu() {
 
   return (
     <div>
+      {/* ── Tab bar ── */}
+      <div className="flex gap-1 mb-5 bg-muted/50 rounded-xl p-1">
+        {[
+          { key: 'productos', label: '🍕 Productos' },
+          { key: 'toppings',  label: '🧀 Toppings'  },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex-1 text-sm font-medium py-2 rounded-lg transition-colors ${
+              tab === t.key
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Toppings tab ── */}
+      {tab === 'toppings' && <ToppingsPanel />}
+
+      {/* ── Productos tab ── */}
+      {tab === 'productos' && <div>
       <div className="flex justify-end mb-4">
         <Button onClick={openCreate} className="gap-2 rounded-xl bg-primary hover:bg-primary/90">
           <Plus className="w-4 h-4" /> Añadir producto
@@ -373,6 +400,7 @@ export default function AdminMenu() {
           ))}
         </div>
       )}
+      </div>}
     </div>
   );
 }

@@ -1044,6 +1044,102 @@ router.delete('/admin/menuItems/:id', async (req, res) => {
   }
 });
 
+// ── Admin: Toppings CRUD ───────────────────────────────────────────────────
+router.get('/admin/toppings', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { rows } = await pool.query(
+      `SELECT * FROM "toppings" ORDER BY "sort_order" ASC, "name" ASC`,
+    );
+    return res.json({ data: rows });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/toppings GET error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/toppings', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const {
+      name, available = true,
+      price_full_33cm, price_half_33cm, price_quarter_33cm,
+      price_full_24cm, price_half_24cm,
+    } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Nombre requerido' });
+    const { rows } = await pool.query(
+      `INSERT INTO "toppings"
+         (name, available,
+          price_full_33cm, price_half_33cm, price_quarter_33cm,
+          price_full_24cm, price_half_24cm,
+          price_full, price_half, price_quarter,
+          sort_order, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$3,$4,$5,
+               (SELECT COALESCE(MAX(sort_order),0)+1 FROM toppings),
+               NOW(),NOW())
+       RETURNING *`,
+      [
+        name.trim(), available,
+        price_full_33cm ?? null, price_half_33cm ?? null, price_quarter_33cm ?? null,
+        price_full_24cm ?? null, price_half_24cm ?? null,
+      ],
+    );
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/toppings POST error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/admin/toppings/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { id } = req.params;
+    const allowed = [
+      'name', 'available',
+      'price_full_33cm', 'price_half_33cm', 'price_quarter_33cm',
+      'price_full_24cm', 'price_half_24cm',
+    ];
+    const updates: string[] = [];
+    const vals: any[]       = [];
+    for (const key of allowed) {
+      if (key in req.body) {
+        vals.push(req.body[key]);
+        updates.push(`"${key}" = $${vals.length}`);
+      }
+    }
+    if (!updates.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    // keep legacy columns in sync
+    if ('price_full_33cm' in req.body) { vals.push(req.body.price_full_33cm); updates.push(`price_full = $${vals.length}`); }
+    if ('price_half_33cm' in req.body) { vals.push(req.body.price_half_33cm); updates.push(`price_half = $${vals.length}`); }
+    if ('price_quarter_33cm' in req.body) { vals.push(req.body.price_quarter_33cm); updates.push(`price_quarter = $${vals.length}`); }
+    vals.push(id);
+    const { rows, rowCount } = await pool.query(
+      `UPDATE "toppings" SET ${updates.join(', ')}, updated_at=NOW() WHERE id=$${vals.length} RETURNING *`,
+      vals,
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Topping no encontrado' });
+    return res.json({ data: rows[0] });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/toppings PATCH error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/admin/toppings/:id', async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { rowCount } = await pool.query(
+      `DELETE FROM "toppings" WHERE id=$1`, [req.params['id']],
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Topping no encontrado' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/toppings DELETE error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── ESC/POS byte generator (backend) ──────────────────────────────────────
 const ESC_POS_INIT   = [0x1b, 0x40];
 const ESC_CENTER     = [0x1b, 0x61, 0x01];

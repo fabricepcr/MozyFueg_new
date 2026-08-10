@@ -14,3 +14,10 @@ uri = "file://migrate-images.js"
 type = "unspecified"
 title = "Script de migración de imágenes"
 description = "Pega este script en la consola del navegador estando en la web del admin."
+
+[[outputs]]
+id = "HlL86Fzeu_74e5PZh01EA"
+uri = "file://precios_pizzas.csv"
+type = "table"
+title = "Precios pizzas — 33cm y 24cm"
+description = "Rellena la columna de 24cm y envíamela para actualizar la base de datos."

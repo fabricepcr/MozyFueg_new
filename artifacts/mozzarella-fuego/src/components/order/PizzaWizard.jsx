@@ -34,11 +34,16 @@ const STEP_LABELS  = {
   confirmar:'Confirmar',
 };
 
-// ── Topping price key based on portion count ──────────────────────────────
-function priceKeyFor(count) {
-  if (count === 1) return 'price_full';
-  if (count === 2) return 'price_half';
-  return 'price_quarter'; // 4 sabores
+// ── Topping price key based on size + portion count ───────────────────────
+function priceKeyFor(count, size) {
+  if (size === '24cm') {
+    // 24cm has no quarter tier — half covers divided portions
+    return count === 1 ? 'price_full_24cm' : 'price_half_24cm';
+  }
+  // 33cm
+  if (count === 1) return 'price_full_33cm';
+  if (count === 2) return 'price_half_33cm';
+  return 'price_quarter_33cm';
 }
 
 // ── Slide animation ────────────────────────────────────────────────────────
@@ -243,9 +248,11 @@ function FlavorPickerPanel({ slot, pizzaOptions, flavors, selectedSize, onPick, 
 
 // ── Topping picker (Toppings step) ────────────────────────────────────────
 const PRICE_KEY_LABELS = {
-  price_full:    'pizza entera',
-  price_half:    'media pizza',
-  price_quarter: 'cuarto de pizza',
+  price_full_33cm:    'pizza entera (33cm)',
+  price_half_33cm:    'media pizza (33cm)',
+  price_quarter_33cm: 'cuarto de pizza (33cm)',
+  price_full_24cm:    'pizza entera (24cm)',
+  price_half_24cm:    'media pizza (24cm)',
 };
 
 function ToppingPickerPanel({ slot, flavorName, allToppings, slotToppings, priceKey, onToggle, onClose }) {
@@ -299,7 +306,7 @@ function ToppingPickerPanel({ slot, flavorName, allToppings, slotToppings, price
       </div>
 
       {/* Topping list — single column for clear price visibility */}
-      <div className="overflow-y-auto flex-1 px-5 pb-8 space-y-1.5 pt-1">
+      <div className="overflow-y-auto flex-1 px-5 pb-2 space-y-1.5 pt-1">
         {filtered.map(topping => {
           const sel = isSelected(topping.id);
           const disabled = atLimit && !sel;
@@ -329,6 +336,16 @@ function ToppingPickerPanel({ slot, flavorName, allToppings, slotToppings, price
             </button>
           );
         })}
+      </div>
+
+      {/* Confirm button */}
+      <div className="px-5 pb-6 pt-3 flex-shrink-0">
+        <button
+          onClick={onClose}
+          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-sm py-3 rounded-xl transition-colors"
+        >
+          {slotToppings.length > 0 ? `Listo · ${slotToppings.length} topping${slotToppings.length > 1 ? 's' : ''} añadido${slotToppings.length > 1 ? 's' : ''}` : 'Sin toppings extra'}
+        </button>
       </div>
     </motion.div>
   );
@@ -378,7 +395,7 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
   const flavorCount  = division?.count || 1;
   const activeFlavors = flavors.slice(0, flavorCount);
   const allSlotsFilled = activeFlavors.every(Boolean);
-  const priceKey     = priceKeyFor(flavorCount);
+  const priceKey     = priceKeyFor(flavorCount, selectedSize);
 
   // ── Pricing ────────────────────────────────────────────────────────────
   const filledFlavors = activeFlavors.filter(Boolean);

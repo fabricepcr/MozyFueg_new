@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runImageUrlMigration } from "./lib/imageMigration";
+import { runToppingsPriceMigration } from "./lib/toppingsMigration";
 
 const rawPort = process.env["PORT"];
 
@@ -27,5 +28,10 @@ app.listen(port, (err) => {
   // One-time migration: replace Supabase image URLs with Replit Object Storage URLs
   runImageUrlMigration().catch((e) =>
     logger.error({ err: e }, "Image URL migration failed")
+  );
+
+  // One-time migration: update topping prices from 2026-08 pricing sheet
+  runToppingsPriceMigration().catch((e) =>
+    logger.error({ err: e }, "Toppings price migration failed")
   );
 });
