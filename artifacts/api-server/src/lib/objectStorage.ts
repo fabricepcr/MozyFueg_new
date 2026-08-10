@@ -171,6 +171,23 @@ export class ObjectStorageService {
     return objectFile;
   }
 
+  async saveObject(objectPath: string, buffer: Buffer, contentType: string): Promise<void> {
+    if (!objectPath.startsWith('/objects/')) {
+      throw new Error('objectPath must start with /objects/');
+    }
+    const parts = objectPath.slice(1).split('/');
+    const entityId = parts.slice(1).join('/');
+    let entityDir = this.getPrivateObjectDir();
+    if (!entityDir.endsWith('/')) {
+      entityDir = `${entityDir}/`;
+    }
+    const fullPath = `${entityDir}${entityId}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    const file = bucket.file(objectName);
+    await file.save(buffer, { contentType, resumable: false });
+  }
+
   normalizeObjectEntityPath(rawPath: string): string {
     if (!rawPath.startsWith('https://storage.googleapis.com/')) {
       return rawPath;

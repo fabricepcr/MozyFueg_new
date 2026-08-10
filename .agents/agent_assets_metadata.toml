@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "_-tLvWT7r_ApagU5OcYVJ"
+uri = "file://toppings_precios.csv"
+type = "table"
+title = "Toppings — Plantilla de precios"
+description = "30 toppings con precio entero, mitad y cuarto. Edita los precios y envía el archivo de vuelta."
+
+[[outputs]]
+id = "yl18cd-JCccKJrQyVC-S6"
+uri = "file://migrate-images.js"
+type = "unspecified"
+title = "Script de migración de imágenes"
+description = "Pega este script en la consola del navegador estando en la web del admin."

@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { runImageUrlMigration } from "./lib/imageMigration";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,9 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // One-time migration: replace Supabase image URLs with Replit Object Storage URLs
+  runImageUrlMigration().catch((e) =>
+    logger.error({ err: e }, "Image URL migration failed")
+  );
 });

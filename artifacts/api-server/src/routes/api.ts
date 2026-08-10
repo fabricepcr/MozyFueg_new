@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, json as expressJson, type IRouter } from "express";
 import * as net from "net";
 import { pool } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
@@ -734,6 +734,42 @@ router.post("/adminSettings", async (req, res) => {
       return res.json({ data: rows[0] });
     }
 
+    // ── Store + delivery settings: get / update ──────────────────────────────
+    if (action === "get") {
+      const [storeRes, deliveryRes] = await Promise.all([
+        pool.query(`SELECT store_open FROM store_settings LIMIT 1`),
+        pool.query(`SELECT manual_active, pickup_active FROM delivery_settings LIMIT 1`),
+      ]);
+      return res.json({
+        store_open:       storeRes.rows[0]?.store_open !== false,
+        delivery_enabled: deliveryRes.rows[0]?.manual_active !== false,
+        pickup_enabled:   deliveryRes.rows[0]?.pickup_active !== false,
+      });
+    }
+
+    if (action === "update" && req.body.settings) {
+      const { store_open, delivery_enabled, pickup_enabled } = req.body.settings;
+      await Promise.all([
+        pool.query(
+          `INSERT INTO store_settings (store_open, singleton_key, updated_at)
+           VALUES ($1, 'main', NOW())
+           ON CONFLICT (singleton_key)
+           DO UPDATE SET store_open = EXCLUDED.store_open, updated_at = NOW()`,
+          [store_open !== false],
+        ),
+        pool.query(
+          `INSERT INTO delivery_settings (manual_active, pickup_active, singleton_key, updated_at)
+           VALUES ($1, $2, 'main', NOW())
+           ON CONFLICT (singleton_key)
+           DO UPDATE SET manual_active = EXCLUDED.manual_active,
+                         pickup_active = EXCLUDED.pickup_active,
+                         updated_at = NOW()`,
+          [delivery_enabled !== false, pickup_enabled !== false],
+        ),
+      ]);
+      return res.json({ success: true });
+    }
+
     // ── Generic table CRUD (authenticated) ──────────────────────────────────
     if (!rawTable) {
       return res.status(400).json({ error: "Unknown action" });
@@ -895,6 +931,48 @@ router.post('/admin/publishImage', async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     req.log.error({ err }, 'publishImage error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: Migrate image from browser cache (base64 → object storage) ────────
+router.post('/admin/migrateImage', expressJson({ limit: '20mb' }), async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { supabaseUrl, base64, contentType } = req.body;
+    if (!supabaseUrl || !base64 || !contentType) {
+      return res.status(400).json({ error: 'supabaseUrl, base64 y contentType son requeridos' });
+    }
+
+    // Decode base64 → Buffer
+    const buffer = Buffer.from(base64, 'base64');
+
+    // Allocate an object path under the private dir
+    const { randomUUID } = await import('crypto');
+    const uuid = randomUUID();
+    const objectPath = `/objects/uploads/${uuid}`;
+
+    // Write directly to object storage
+    await objectStorageService.saveObject(objectPath, buffer, contentType);
+
+    // Mark public
+    await objectStorageService.trySetObjectEntityAclPolicy(objectPath, {
+      owner: 'admin',
+      visibility: 'public',
+    });
+
+    // The URL the app uses to serve this image
+    const newImageUrl = `/api/storage${objectPath}`;
+
+    // Update every menu_item that still points at the old Supabase URL
+    const { rowCount } = await pool.query(
+      `UPDATE menu_items SET image_url = $1 WHERE image_url = $2`,
+      [newImageUrl, supabaseUrl]
+    );
+
+    return res.json({ success: true, newImageUrl, updated: rowCount });
+  } catch (err: any) {
+    req.log.error({ err }, 'migrateImage error');
     return res.status(500).json({ error: err.message });
   }
 });
