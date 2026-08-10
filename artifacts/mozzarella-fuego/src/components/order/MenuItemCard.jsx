@@ -76,7 +76,7 @@ export default function MenuItemCard({ item }) {
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`bg-card rounded-xl border overflow-hidden transition-all group relative ${
+        className={`bg-card rounded-xl border overflow-hidden transition-all group relative flex flex-col ${
           soldOut
             ? 'border-border/40 opacity-70'
             : 'border-border/50 hover:shadow-md'
@@ -113,7 +113,7 @@ export default function MenuItemCard({ item }) {
           </div>
         )}
 
-        <div className="p-4">
+        <div className="p-4 flex flex-col flex-1">
           <div className="flex justify-between items-start gap-2 mb-1.5">
             <h3 className={`font-heading font-semibold ${soldOut ? 'text-muted-foreground' : 'text-foreground'}`}>
               {item.name}
@@ -156,7 +156,7 @@ export default function MenuItemCard({ item }) {
           {soldOut ? (
             <Button
               disabled
-              className="w-full rounded-lg gap-2 mt-2 bg-muted text-muted-foreground cursor-not-allowed hover:bg-muted"
+              className="w-full rounded-lg gap-2 mt-auto bg-muted text-muted-foreground cursor-not-allowed hover:bg-muted"
               size="sm"
             >
               <Ban className="w-4 h-4" />
@@ -165,7 +165,7 @@ export default function MenuItemCard({ item }) {
           ) : (
             <Button
               onClick={handleAddClick}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg gap-2 mt-2"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg gap-2 mt-auto"
               size="sm"
             >
               <Plus className="w-4 h-4" />
