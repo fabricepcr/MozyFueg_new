@@ -4,7 +4,7 @@
 let audioCtx = null;
 let masterGain = null;
 let keepAliveOsc = null;
-let loopTimer = null;
+let loopTimer = null;   // sentinel — non-null while a ding is "pending dismiss"
 let maxDurationTimer = null;
 let watchdogTimer = null;
 let listenersReady = false;
@@ -12,10 +12,8 @@ let ready = false;
 
 const listeners = new Set();
 
-// 🔊 Volumen del aviso. NO subir de ~1.8: por encima satura y suena "roto".
-const ALERT_GAIN = 1.6;
-const MAX_DURATION_MS = 30000;  // tope: 30 s sonando
-const LOOP_INTERVAL_MS = 1600;
+// 🔊 Volumen del aviso.
+const ALERT_GAIN = 1.4;
 
 /* ---------------- Estado ---------------- */
 
@@ -134,53 +132,54 @@ export function initSound() {
 
 /* ---------------- Sonido ---------------- */
 
-async function playChime() {
+// Single bell-like "ding": sine wave, fast attack, long exponential decay.
+async function playDing() {
   try {
     const ok = await ensureRunning();
     if (!ok) return;
 
     const ctx = audioCtx;
-    const now = ctx.currentTime + 0.03; // se lee DESPUÉS del resume
+    const now = ctx.currentTime + 0.03;
 
-    const notes = [
-      { freq: 880, start: 0.0,  dur: 0.35 },
-      { freq: 660, start: 0.32, dur: 0.50 },
+    // Two partials for a richer bell tone
+    const partials = [
+      { freq: 1047, gain: 0.9, decay: 1.4 },  // C6 — fundamental
+      { freq: 2093, gain: 0.35, decay: 0.7 }, // C7 — overtone
     ];
 
-    notes.forEach(({ freq, start, dur }) => {
+    partials.forEach(({ freq, gain, decay }) => {
       const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = 'triangle';
+      const g   = ctx.createGain();
+      osc.type = 'sine';
       osc.frequency.value = freq;
 
-      const t0 = now + start;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.8, t0 + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(gain, now + 0.008); // sharp attack
+      g.gain.exponentialRampToValueAtTime(0.0001, now + decay);
 
       osc.connect(g);
       g.connect(masterGain);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.05);
+      osc.start(now);
+      osc.stop(now + decay + 0.05);
       osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (_) {} };
     });
   } catch (_) {}
 }
 
+// Plays a single ding once per new-order event; loopTimer acts as a sentinel
+// so rapid duplicate events don't stack up.
 export function startSoundLoop() {
   if (loopTimer) return;
-  playChime();
-  loopTimer = setInterval(playChime, LOOP_INTERVAL_MS);
-  if (maxDurationTimer) clearTimeout(maxDurationTimer);
-  maxDurationTimer = setTimeout(() => { stopSoundLoop(); }, MAX_DURATION_MS);
+  playDing();
+  loopTimer = 1; // sentinel — cleared by stopSoundLoop
 }
 
 export function stopSoundLoop() {
-  if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+  loopTimer = null;
   if (maxDurationTimer) { clearTimeout(maxDurationTimer); maxDurationTimer = null; }
 }
 
 export async function testSound() {
   await unlockSound();
-  await playChime();
+  await playDing();
 }

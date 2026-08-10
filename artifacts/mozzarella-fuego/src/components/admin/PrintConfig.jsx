@@ -170,10 +170,14 @@ export default function PrintConfig() {
 
         {/* USB note */}
         {config.print_mode === 'usb' && (
-          <div className="border-t pt-4">
+          <div className="border-t pt-4 space-y-2">
             <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-1.5">
               <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-              La primera vez que imprimas, el navegador te pedirá seleccionar el puerto serie de la impresora. A partir de entonces lo recuerda automáticamente. Solo funciona en Chrome en PC/Mac.
+              <span>
+                Al imprimir, el navegador intenta detectar la impresora por <strong>WebUSB</strong> (Mac/Linux) y, si no la encuentra, por <strong>puerto COM</strong> (Serie/USB-serie). La primera vez tendrás que seleccionarla del selector; después la recuerda.
+                <br className="mb-1" />
+                <strong>Windows:</strong> si no aparece en el selector, el driver de Windows bloquea el acceso directo. Soluciones: instalar el driver <strong>WinUSB</strong> con <em>Zadig</em>, activar el modo COM en la impresora, o cambiar a modo <strong>Red (TCP/IP)</strong> que es la opción más fiable.
+              </span>
             </p>
           </div>
         )}

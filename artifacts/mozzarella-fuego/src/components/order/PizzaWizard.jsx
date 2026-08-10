@@ -164,12 +164,27 @@ function WizardStepper({ steps, currentIndex }) {
 }
 
 // ── Flavor picker (Sabores step) ──────────────────────────────────────────
-function FlavorPickerPanel({ slot, pizzaOptions, flavors, onPick, onClose }) {
+function FlavorPickerPanel({ slot, pizzaOptions, flavors, selectedSize, onPick, onClose }) {
   const [search, setSearch] = useState('');
+
+  // Determine per-item size availability based on the chosen size
+  const isSizeAvail = (pizza) => {
+    if (!selectedSize) return true;
+    const key = selectedSize === '24cm' ? 'available_24cm' : 'available_33cm';
+    return pizza[key] !== false;
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? pizzaOptions.filter(p => p.name.toLowerCase().includes(q)) : pizzaOptions;
-  }, [pizzaOptions, search]);
+    const list = q ? pizzaOptions.filter(p => p.name.toLowerCase().includes(q)) : pizzaOptions;
+    // Available items first, unavailable at bottom
+    return [...list].sort((a, b) => {
+      const aOk = isSizeAvail(a) ? 0 : 1;
+      const bOk = isSizeAvail(b) ? 0 : 1;
+      return aOk - bOk;
+    });
+  }, [pizzaOptions, search, selectedSize]);
+
   return (
     <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
       transition={{ type: 'spring', damping: 28, stiffness: 300 }}
@@ -197,8 +212,18 @@ function FlavorPickerPanel({ slot, pizzaOptions, flavors, onPick, onClose }) {
       </div>
       <div className="overflow-y-auto flex-1 px-5 pb-8 space-y-1.5">
         {filtered.map(pizza => {
+          const avail       = isSizeAvail(pizza);
           const inThisSlot  = flavors[slot]?.item?.name === pizza.name;
           const inOtherSlot = !inThisSlot && flavors.some(f => f?.item?.name === pizza.name);
+          if (!avail) {
+            return (
+              <div key={pizza.name}
+                className="w-full flex items-center gap-3 rounded-xl px-4 py-3 border border-red-200 bg-red-50/60 text-sm select-none opacity-70">
+                <span className="flex-1 font-medium truncate text-red-700">{pizza.name.replace(/^Pizza /i, '')}</span>
+                <span className="text-[11px] font-semibold text-red-500 whitespace-nowrap">No disponible en esa talla</span>
+              </div>
+            );
+          }
           return (
             <button key={pizza.name} onClick={() => onPick(pizza)}
               className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 border text-sm text-left transition-all ${
@@ -474,7 +499,21 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
                   <p className="text-sm text-muted-foreground mb-5">Nuestras pizzas están hechas a mano con masa madre.</p>
                   <div className="grid grid-cols-2 gap-3">
                     {MF_SIZES.map(size => {
+                      const availKey = size.id === '24cm' ? 'available_24cm' : 'available_33cm';
+                      const sizeAvail = item[availKey] !== false;
                       const sel = selectedSize === size.id;
+                      if (!sizeAvail) {
+                        return (
+                          <div key={size.id} className="rounded-2xl p-4 text-left border-2 border-border/30 bg-muted/20 opacity-60 select-none">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-heading font-bold text-base text-muted-foreground">{size.label}</span>
+                              <span className="text-[11px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-semibold">{size.cm}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-3">{size.serves}</p>
+                            <span className="text-xs font-semibold text-red-400">Agotado</span>
+                          </div>
+                        );
+                      }
                       return (
                         <button key={size.id} onClick={() => handleSizeSelect(size.id)}
                           className={`rounded-2xl p-4 text-left border-2 transition-all ${
@@ -727,6 +766,7 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
             <div className="fixed inset-0 bg-black/30" style={{ zIndex: 65 }} onClick={() => setPickingSlot(null)} />
             <FlavorPickerPanel
               slot={pickingSlot} pizzaOptions={pizzaOptions} flavors={activeFlavors}
+              selectedSize={selectedSize}
               onPick={pickFlavor} onClose={() => setPickingSlot(null)} />
           </>
         )}

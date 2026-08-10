@@ -34,40 +34,7 @@ function validateScheduledTime(dateStr, timeStr, schedule) {
   return null;
 }
 
-const RESTAURANT_LAT = 41.4116;
-const RESTAURANT_LNG = 2.1751;
 const MAX_DELIVERY_KM = 8;
-
-// Caja delimitadora de Barcelona y área metropolitana (minLon,minLat,maxLon,maxLat)
-const BCN_BBOX = '1.85,41.28,2.35,41.55';
-
-// Normaliza prefijos de calle en castellano → catalán para mejorar los resultados
-// de búsqueda (OSM en Barcelona usa mayoritariamente el nombre en catalán).
-function normalizeStreetQuery(input) {
-  if (!input) return input;
-  let q = ' ' + input.trim() + ' ';
-  const map = [
-    [/\bcalle\b/gi, 'Carrer'],
-    [/\bc\/\s*/gi, 'Carrer '],
-    [/\bavenida\b/gi, 'Avinguda'],
-    [/\bavda\.?\b/gi, 'Avinguda'],
-    [/\bav\.?\b/gi, 'Avinguda'],
-    [/\bpaseo\b/gi, 'Passeig'],
-    [/\bpº\b/gi, 'Passeig'],
-    [/\bplaza\b/gi, 'Plaça'],
-    [/\bpza\.?\b/gi, 'Plaça'],
-    [/\bpl\.?\b/gi, 'Plaça'],
-    [/\bronda\b/gi, 'Ronda'],
-    [/\btravesía\b/gi, 'Travessera'],
-    [/\btravesia\b/gi, 'Travessera'],
-    [/\bpasaje\b/gi, 'Passatge'],
-    [/\brambla\b/gi, 'Rambla'],
-    [/\bgran vía\b/gi, 'Gran Via'],
-    [/\bgran via\b/gi, 'Gran Via'],
-  ];
-  for (const [re, rep] of map) q = q.replace(re, rep);
-  return q.trim();
-}
 
 const TIP_OPTIONS = [
   { label: 'Sin propina', value: 0, type: 'fixed' },
@@ -168,46 +135,23 @@ export default function Checkout() {
     }
   };
 
-  // ─── Buscar sugerencias de calle (Photon / OpenStreetMap) ──────────────────
+  // ─── Buscar sugerencias de calle (Google Places Autocomplete, vía backend) ──
   const fetchSuggestions = async (query) => {
-    const q = normalizeStreetQuery(query);
-    if (!q || q.length < 4) { setSuggestions([]); setShowSuggestions(false); return; }
+    if (!query || query.trim().length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
     const myReqId = ++reqIdRef.current;
     setLoadingSuggestions(true);
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=default&limit=6&lat=${RESTAURANT_LAT}&lon=${RESTAURANT_LNG}&bbox=${BCN_BBOX}`;
-    let features = [];
+    let predictions = [];
     try {
-      const res = await fetch(url);
-      const json = await res.json();
-      features = Array.isArray(json?.features) ? json.features : [];
-    } catch {
-      features = [];
-    }
-    // Si llegó una respuesta más nueva mientras tanto, descartar esta
+      const res = await fetch(`/api/places/autocomplete?q=${encodeURIComponent(query.trim())}`);
+      const data = await res.json();
+      predictions = data.predictions || [];
+    } catch { predictions = []; }
     if (myReqId !== reqIdRef.current) return;
-
-    const parsed = features
-      .map(f => {
-        const p = f.properties || {};
-        const coords = f.geometry?.coordinates || [];
-        const streetName = p.street || p.name || '';
-        const number = p.housenumber || '';
-        if (!streetName) return null;
-        return {
-          streetName,
-          number,
-          postcode: p.postcode || '',
-          city: p.city || p.district || p.locality || '',
-          lat: coords[1],
-          lng: coords[0],
-          line1: [streetName, number].filter(Boolean).join(', '),
-          line2: [p.postcode, p.city || p.district || p.locality].filter(Boolean).join(' '),
-        };
-      })
-      .filter(Boolean)
-      // Preferimos resultados de la provincia de Barcelona (CP 08xxx) cuando hay CP
-      .filter(s => !s.postcode || s.postcode.startsWith('08'));
-
+    const parsed = predictions.map(p => ({
+      placeId: p.place_id,
+      line1: p.structured_formatting?.main_text || p.description,
+      line2: p.structured_formatting?.secondary_text || '',
+    }));
     setLoadingSuggestions(false);
     setSuggestions(parsed);
     setShowSuggestions(parsed.length > 0);
@@ -219,26 +163,31 @@ export default function Checkout() {
     if (justSelectedRef.current) { justSelectedRef.current = false; return; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const value = form.street;
-    if (!value || value.trim().length < 4) { setSuggestions([]); setShowSuggestions(false); return; }
+    if (!value || value.trim().length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
     debounceRef.current = setTimeout(() => fetchSuggestions(value), 350);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [form.street, orderType]);
 
-  const handleSelectSuggestion = (s) => {
-    const typedNumber = (form.street.match(/\d+/) || [])[0] || '';
-    const chosenNumber = s.number || typedNumber;
-    const finalStreet = [s.streetName, chosenNumber].filter(Boolean).join(', ');
+  const handleSelectSuggestion = async (s) => {
     justSelectedRef.current = true;
-    selectedCoordsRef.current = (isFinite(s.lat) && isFinite(s.lng)) ? { lat: s.lat, lng: s.lng } : null;
-    setForm(prev => ({ ...prev, street: finalStreet, postalCode: prev.postalCode || s.postcode || '' }));
     setSuggestions([]);
     setShowSuggestions(false);
     setAddressError('');
     setDeliveryInfo(null);
-    // Validar zona con las coordenadas ya conocidas (rápido y exacto)
-    setTimeout(() => {
-      if (selectedCoordsRef.current) checkDeliveryZone(selectedCoordsRef.current);
-    }, 0);
+    selectedCoordsRef.current = null;
+    setForm(prev => ({ ...prev, street: s.line1 }));
+    // Resolve exact coords via Google Place Details (API key stays server-side)
+    try {
+      const res = await fetch(`/api/places/details?placeId=${encodeURIComponent(s.placeId)}`);
+      const details = await res.json();
+      if (details.lat && details.lng) {
+        selectedCoordsRef.current = { lat: details.lat, lng: details.lng };
+        if (details.postalCode) {
+          setForm(prev => ({ ...prev, postalCode: prev.postalCode || details.postalCode }));
+        }
+        checkDeliveryZone({ lat: details.lat, lng: details.lng });
+      }
+    } catch { /* checkDeliveryZone on submit will surface appropriate error */ }
   };
 
   // ─── Comprobar zona de reparto (distancia REAL por carretera, vía backend) ──
@@ -260,50 +209,14 @@ export default function Checkout() {
       }
     }
 
-    let lat, lon;
-
-    if (coordsArg && isFinite(coordsArg.lat) && isFinite(coordsArg.lng)) {
-      // Coordenadas exactas elegidas en el autocompletado
-      lat = coordsArg.lat;
-      lon = coordsArg.lng;
-    } else {
-      // Geocodificación (para direcciones escritas a mano sin elegir sugerencia)
-      const DEG = 0.35;
-      const viewbox = `${RESTAURANT_LNG - DEG},${RESTAURANT_LAT + DEG},${RESTAURANT_LNG + DEG},${RESTAURANT_LAT - DEG}`;
-      const normStreet = normalizeStreetQuery(form.street);
-
-      const structuredUrl = `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(normStreet)}&postalcode=${encodeURIComponent(form.postalCode || '')}&city=Barcelona&country=Espa%C3%B1a&format=json&limit=5&addressdetails=1&viewbox=${viewbox}&bounded=1`;
-
-      let data = [];
-      try {
-        const res = await fetch(structuredUrl, { headers: { 'Accept-Language': 'es', 'User-Agent': 'MozzarellaYFuego/1.0' } });
-        data = await res.json();
-      } catch { data = []; }
-
-      if (data.length === 0) {
-        const cpPart = form.postalCode?.length === 5 ? ` ${form.postalCode}` : '';
-        const q = `${normStreet}${cpPart}, Barcelona, España`;
-        const freeUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&countrycodes=es&addressdetails=1&viewbox=${viewbox}&bounded=1`;
-        try {
-          const res = await fetch(freeUrl, { headers: { 'Accept-Language': 'es', 'User-Agent': 'MozzarellaYFuego/1.0' } });
-          data = await res.json();
-        } catch { data = []; }
-      }
-
-      if (data.length === 0) {
-        setCheckingAddress(false);
-        setAddressError('No pudimos encontrar esa dirección. Empieza a escribir la calle y elígela de la lista para asegurar la ubicación (ej: Carrer de Mallorca, 123).');
-        return null;
-      }
-
-      const found =
-        data.find(r => r.address?.postcode === form.postalCode) ||
-        data.find(r => r.address?.postcode?.startsWith('08')) ||
-        data[0];
-
-      lat = parseFloat(found.lat);
-      lon = parseFloat(found.lon);
+    // Coordinates must come from a Google Places selection — no free geocoding fallback
+    if (!coordsArg || !isFinite(coordsArg.lat) || !isFinite(coordsArg.lng)) {
+      setCheckingAddress(false);
+      setAddressError('Selecciona tu dirección de la lista para que podamos verificar la zona de reparto.');
+      return null;
     }
+    const lat = coordsArg.lat;
+    const lon = coordsArg.lng;
 
     // Preguntar al backend la distancia REAL por carretera (Google Maps).
     let result;
@@ -344,15 +257,14 @@ export default function Checkout() {
   };
 
   const handleAddressBlur = () => {
-    // Pequeño retraso para permitir el click en una sugerencia
+    // Small delay so a suggestion click fires before the dropdown hides
     setTimeout(() => setShowSuggestions(false), 150);
-    if (orderType === 'delivery' && form.street.trim().length > 5 && !deliveryInfo) {
-      if (!/\d/.test(form.street)) {
-        setAddressError('Incluye el número de la calle (ej: Carrer de Mallorca, 123).');
-        return;
+    if (orderType === 'delivery' && form.street.trim().length > 5 && !deliveryInfo && !addressError) {
+      if (selectedCoordsRef.current) {
+        checkDeliveryZone(selectedCoordsRef.current);
+      } else {
+        setAddressError('Selecciona tu dirección de la lista para verificar la zona de reparto.');
       }
-      // Si ya hay coords elegidas, se usan; si no, se geocodifica
-      checkDeliveryZone(selectedCoordsRef.current);
     }
   };
 

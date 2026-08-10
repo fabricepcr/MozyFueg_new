@@ -137,9 +137,9 @@ export function buildTicketHTML(order, widthMm = 80) {
     <div style="margin-bottom:4px;">
       <div class="lbl">Cliente</div>
       <div class="b">${order.customer_name || '-'}</div>
-      <div class="s">Tel: ${order.customer_phone || '-'}</div>
-      ${isDelivery && order.customer_address ? `<div class="s">${order.customer_address}</div>` : ''}
-      ${!isDelivery && order.pickup_time ? `<div class="s">Recogida: <b>${order.pickup_time}</b></div>` : ''}
+      <div class="b s">Tel: ${order.customer_phone || '-'}</div>
+      ${isDelivery && order.customer_address ? `<div class="b s">${order.customer_address}</div>` : ''}
+      ${!isDelivery && order.pickup_time ? `<div class="b s">Recogida: ${order.pickup_time}</div>` : ''}
     </div>
 
     ${order.customer_notes ? `

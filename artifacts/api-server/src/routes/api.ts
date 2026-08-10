@@ -72,6 +72,31 @@ router.get("/menuItems", async (req, res) => {
   }
 });
 
+// ── SSE: real-time push to admin clients ───────────────────────────────────
+const sseClients = new Set<any>();
+
+function broadcastNewOrder(orderId: string) {
+  const payload = `data: ${JSON.stringify({ type: "new_order", id: orderId })}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch (_) { sseClients.delete(client); }
+  }
+}
+
+router.get("/admin/orderStream", (req: any, res: any) => {
+  if (!req.session?.adminAuthed) return res.status(401).end();
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+  sseClients.add(res);
+  const ping = setInterval(() => {
+    try { res.write(":ping\n\n"); } catch (_) { clearInterval(ping); sseClients.delete(res); }
+  }, 20000);
+  req.on("close", () => { clearInterval(ping); sseClients.delete(res); });
+});
+
 // ── Create order (pay on delivery / pickup) ────────────────────────────────
 router.post("/createOrderDirect", async (req, res) => {
   try {
@@ -108,7 +133,9 @@ router.post("/createOrderDirect", async (req, res) => {
         total - delivery_fee - tip,
       ],
     );
-    return res.json({ success: true, orderId: rows[0].id });
+    const orderId = rows[0].id;
+    broadcastNewOrder(orderId);
+    return res.json({ success: true, orderId });
   } catch (err: any) {
     req.log.error({ err }, "createOrderDirect error");
     return res.status(500).json({ error: err.message });
@@ -130,24 +157,31 @@ router.post("/calcularEnvio", async (req, res) => {
         .status(500)
         .json({ error: "Configuración de mapas no disponible" });
     }
-    const url =
-      `https://maps.googleapis.com/maps/api/distancematrix/json` +
-      `?origins=${RESTAURANT_LAT},${RESTAURANT_LNG}` +
-      `&destinations=${destLat},${destLng}` +
-      `&mode=driving&departure_time=now&language=es&region=es&key=${apiKey}`;
-    const gRes = await fetch(url);
+    // Routes API (replaces legacy Distance Matrix which is disabled on new GCP projects)
+    const gRes = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+      },
+      body: JSON.stringify({
+        origin:      { location: { latLng: { latitude: RESTAURANT_LAT, longitude: RESTAURANT_LNG } } },
+        destination: { location: { latLng: { latitude: destLat,        longitude: destLng        } } },
+        travelMode:  'DRIVE',
+      }),
+    });
     const gData = (await gRes.json()) as any;
-    if (gData.status !== "OK") {
-      return res
-        .status(502)
-        .json({ error: "No se pudo calcular la distancia" });
+    if (!gRes.ok || !Array.isArray(gData.routes)) {
+      req.log.error({ httpStatus: gRes.status, gData }, "calcularEnvio: Routes API error");
+      return res.status(502).json({ error: "No se pudo calcular la distancia" });
     }
-    const element = gData.rows?.[0]?.elements?.[0];
-    if (!element || element.status !== "OK") {
+    if (!gData.routes.length) {
       return res.json({ ok: false, reason: "no_route" });
     }
-    const km = parseFloat((element.distance.value / 1000).toFixed(2));
-    const durationSec = (element.duration_in_traffic || element.duration).value;
+    const route       = gData.routes[0];
+    const km          = parseFloat((route.distanceMeters / 1000).toFixed(2));
+    const durationSec = parseInt((route.duration ?? '0s').replace('s', ''), 10);
     const estimatedMin = Math.round(durationSec / 60) + 15;
     if (km > MAX_DELIVERY_KM) {
       return res.json({ ok: false, reason: "too_far", km });
@@ -155,6 +189,55 @@ router.post("/calcularEnvio", async (req, res) => {
     return res.json({ ok: true, km, fee: calcDeliveryFee(km), estimatedMin });
   } catch (err: any) {
     req.log.error({ err }, "calcularEnvio error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Google Places proxy (keeps API key server-side) ───────────────────────
+router.get('/places/autocomplete', async (req: any, res: any) => {
+  try {
+    const q = req.query.q as string;
+    if (!q || q.trim().length < 3) return res.json({ predictions: [] });
+    const apiKey = process.env['GOOGLE_MAPS_API_KEY'];
+    if (!apiKey) return res.status(503).json({ error: 'Google Maps no configurado' });
+    const url =
+      `https://maps.googleapis.com/maps/api/place/autocomplete/json` +
+      `?input=${encodeURIComponent(q.trim())}` +
+      `&components=country:es` +
+      `&location=${RESTAURANT_LAT},${RESTAURANT_LNG}` +
+      `&radius=25000` +
+      `&types=address` +
+      `&language=es` +
+      `&key=${apiKey}`;
+    const gRes  = await fetch(url);
+    const gData = (await gRes.json()) as any;
+    return res.json({ predictions: gData.predictions || [] });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/places/details', async (req: any, res: any) => {
+  try {
+    const placeId = req.query.placeId as string;
+    if (!placeId) return res.status(400).json({ error: 'placeId requerido' });
+    const apiKey = process.env['GOOGLE_MAPS_API_KEY'];
+    if (!apiKey) return res.status(503).json({ error: 'Google Maps no configurado' });
+    const url =
+      `https://maps.googleapis.com/maps/api/place/details/json` +
+      `?place_id=${encodeURIComponent(placeId)}` +
+      `&fields=geometry,formatted_address,address_components` +
+      `&language=es` +
+      `&key=${apiKey}`;
+    const gRes  = await fetch(url);
+    const gData = (await gRes.json()) as any;
+    const result = gData.result;
+    if (!result) return res.status(404).json({ error: 'Lugar no encontrado' });
+    const lat        = result.geometry?.location?.lat;
+    const lng        = result.geometry?.location?.lng;
+    const postalCode = (result.address_components as any[])?.find(c => c.types.includes('postal_code'))?.long_name || '';
+    return res.json({ lat, lng, formattedAddress: result.formatted_address, postalCode });
+  } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
@@ -849,7 +932,7 @@ router.post('/admin/menuItems', async (req, res) => {
 router.patch('/admin/menuItems/:id', async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'sort_order'];
+    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'available_33cm', 'available_24cm', 'sort_order'];
     const body = req.body as Record<string, any>;
     const entries = Object.entries(body).filter(([k]) => allowed.includes(k) && body[k] !== undefined);
     if (!entries.length) return res.status(400).json({ error: 'Nada que actualizar' });
@@ -1133,62 +1216,97 @@ router.post('/admin/print', async (req, res) => {
 });
 
 // ── Admin: WhatsApp notify driver via green-api ────────────────────────────
+// ── Shared: build WhatsApp order message ──────────────────────────────────
+function buildOrderMessage(order: any): string {
+  const orderId    = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
+  const isDelivery = order.order_type !== 'pickup';
+  const itemsList  = ((order.items || []) as any[]).map((i: any) => `• ${i.quantity}x ${i.name}`).join('\n');
+  const mapsUrl    = isDelivery && order.customer_address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.customer_address)}`
+    : null;
+  const PAYMENT_LABELS: Record<string, string> = {
+    card: '💳 Datáfono', datafono: '💳 Datáfono',
+    cash: '💵 Efectivo', efectivo: '💵 Efectivo',
+    bizum: '📱 Bizum',
+  };
+  const paymentLabel = PAYMENT_LABELS[order.payment_method] ?? order.payment_method ?? '—';
+  return [
+    `🍕 *Nuevo pedido #${orderId}*`,
+    '',
+    `👤 *Cliente:* ${order.customer_name}`,
+    `📞 ${order.customer_phone}`,
+    isDelivery && order.customer_address ? `📍 *Dirección:* ${order.customer_address}` : null,
+    mapsUrl ? `🗺️ ${mapsUrl}` : null,
+    order.customer_notes ? `📝 ${order.customer_notes}` : null,
+    '',
+    '*Artículos:*',
+    itemsList,
+    '',
+    `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
+    `💳 *Pago:* ${paymentLabel}`,
+  ].filter((l): l is string => l !== null && l !== undefined).join('\n');
+}
+
+function normPhone(raw: string): string {
+  const p = String(raw).replace(/\D/g, '');
+  return (p.startsWith('6') || p.startsWith('7') || p.startsWith('9')) ? '34' + p : p;
+}
+
+async function sendGreenApi(instanceId: string, token: string, phone: string, message: string) {
+  const chatId = `${normPhone(phone)}@c.us`;
+  const url    = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+  const gRes   = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId, message }) });
+  const gData  = (await gRes.json()) as any;
+  if (!gRes.ok || gData.error) throw new Error(gData.error || 'Error de green-api');
+  return gData.idMessage as string;
+}
+
 router.post('/admin/notifyDriver', async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
     const { order, driver } = req.body;
-
     const instanceId = process.env['GREEN_API_INSTANCE_ID'];
     const token      = process.env['GREEN_API_TOKEN'];
-    if (!instanceId || !token) {
-      return res.status(503).json({
-        error: 'GREEN_API no configurado. Añade GREEN_API_INSTANCE_ID y GREEN_API_TOKEN en los secrets del servidor.',
-      });
-    }
-    if (!order || !driver?.phone) {
-      return res.status(400).json({ error: 'order y driver.phone son requeridos' });
-    }
-
-    // Normalise Spanish phone → international format (chatId for green-api)
-    let phone = String(driver.phone).replace(/\D/g, '');
-    if (phone.startsWith('6') || phone.startsWith('7') || phone.startsWith('9')) phone = '34' + phone;
-    const chatId = `${phone}@c.us`;
-
-    const orderId  = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
-    const isDelivery = order.order_type !== 'pickup';
-    const itemsList = ((order.items || []) as any[])
-      .map((i: any) => `• ${i.quantity}x ${i.name}`)
-      .join('\n');
-
-    const lines = [
-      `🍕 *Nuevo pedido #${orderId}*`,
-      '',
-      `👤 *Cliente:* ${order.customer_name}`,
-      `📞 ${order.customer_phone}`,
-      isDelivery && order.customer_address ? `📍 ${order.customer_address}` : null,
-      order.customer_notes ? `📝 ${order.customer_notes}` : null,
-      '',
-      '*Artículos:*',
-      itemsList,
-      '',
-      `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
-    ].filter((l): l is string => l !== null && l !== undefined);
-
-    const message = lines.join('\n');
-    const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
-
-    const gRes  = await fetch(url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ chatId, message }),
-    });
-    const gData = (await gRes.json()) as any;
-    if (!gRes.ok || gData.error) {
-      return res.status(502).json({ error: gData.error || 'Error de green-api', detail: gData });
-    }
-    return res.json({ success: true, idMessage: gData.idMessage });
+    if (!instanceId || !token) return res.status(503).json({ error: 'GREEN_API no configurado.' });
+    if (!order || !driver?.phone) return res.status(400).json({ error: 'order y driver.phone son requeridos' });
+    const idMessage = await sendGreenApi(instanceId, token, driver.phone, buildOrderMessage(order));
+    return res.json({ success: true, idMessage });
   } catch (err: any) {
     req.log.error({ err }, 'admin/notifyDriver error');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: broadcast order to ALL active drivers ───────────────────────────
+router.post('/admin/notifyAllDrivers', async (req: any, res: any) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const { order } = req.body;
+    const instanceId = process.env['GREEN_API_INSTANCE_ID'];
+    const token      = process.env['GREEN_API_TOKEN'];
+    if (!instanceId || !token) return res.status(503).json({ error: 'GREEN_API no configurado.' });
+    if (!order) return res.status(400).json({ error: 'order es requerido' });
+
+    const { rows: drivers } = await pool.query(
+      `SELECT id, name, phone FROM "delivery_guys" WHERE active = true`,
+    );
+    if (!drivers.length) return res.status(400).json({ error: 'No hay repartidores activos.' });
+
+    const message = buildOrderMessage(order);
+    const results = await Promise.all(
+      drivers.map(async (d: any) => {
+        try {
+          const idMessage = await sendGreenApi(instanceId, token, d.phone, message);
+          return { name: d.name, ok: true, idMessage };
+        } catch (e: any) {
+          return { name: d.name, ok: false, error: e.message };
+        }
+      }),
+    );
+    const failed = results.filter(r => !r.ok);
+    return res.json({ success: true, sent: results.length - failed.length, failed: failed.length, results });
+  } catch (err: any) {
+    req.log.error({ err }, 'admin/notifyAllDrivers error');
     return res.status(500).json({ error: err.message });
   }
 });

@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '@/lib/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, ExternalLink, RotateCcw, AlertTriangle, ArrowLeft, Copy, Trash2, Volume2, VolumeX, Printer } from 'lucide-react';
+import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, RotateCcw, AlertTriangle, ArrowLeft, Trash2, Volume2, VolumeX, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AdminLogin from '@/components/admin/AdminLogin';
-import ThermerShare from '@/components/admin/ThermerShare';
+// ThermerShare removed
 import OrderDetailModal from '@/components/admin/OrderDetailModal';
 import StorePanel from '@/components/admin/StorePanel';
 import PizzasPanel from '@/components/admin/PizzasPanel';
@@ -19,13 +19,13 @@ import { useToast } from '@/components/ui/use-toast';
 
 
 const STATUS_CONFIG = {
-  pending:         { label: 'Recibido', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Package },
-  confirmed:       { label: 'Confirmado', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: CheckCircle },
-  preparing:       { label: 'Preparando', color: 'bg-orange-100 text-orange-800 border-orange-200', icon: ChefHat },
-  delivering:      { label: 'En camino', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: Bike },
-  delivered:       { label: 'Entregado', color: 'bg-green-100 text-green-800 border-green-200', icon: CheckCircle },
-  cancelled:       { label: 'Cancelado', color: 'bg-red-100 text-red-800 border-red-200', icon: XCircle },
-  refunded:        { label: 'Reembolsado', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: RotateCcw },
+  pending:    { label: 'Recibido',     color: 'bg-orange-100 text-orange-800 border-orange-300', cardClass: 'bg-orange-50 border-orange-400',  icon: Package },
+  confirmed:  { label: 'Confirmado',   color: 'bg-green-100 text-green-800 border-green-200',    cardClass: 'bg-card border-border',            icon: CheckCircle },
+  preparing:  { label: 'Preparando',   color: 'bg-orange-100 text-orange-800 border-orange-200', cardClass: 'bg-card border-border',            icon: ChefHat },
+  delivering: { label: 'En camino',    color: 'bg-purple-100 text-purple-800 border-purple-200', cardClass: 'bg-card border-border',            icon: Bike },
+  delivered:  { label: 'Entregado',    color: 'bg-green-100 text-green-800 border-green-200',    cardClass: 'bg-card border-border',            icon: CheckCircle },
+  cancelled:  { label: 'Cancelado',    color: 'bg-red-100 text-red-800 border-red-200',           cardClass: 'bg-card border-border',            icon: XCircle },
+  refunded:   { label: 'Reembolsado',  color: 'bg-purple-100 text-purple-800 border-purple-200', cardClass: 'bg-card border-border',            icon: RotateCcw },
 };
 
 const PAYMENT_LABELS = { efectivo: '💵 Efectivo', tarjeta: '💳 Tarjeta', bizum: '📱 Bizum', datafono: '💳 Datáfono a domicilio' };
@@ -45,6 +45,30 @@ const TABS = [
 // Include 'pending' so staff can pre-assign a driver before confirming, making
 // the confirm → WhatsApp flow work atomically in one status change.
 const DRIVER_ASSIGN_STATUSES = ['pending', 'confirmed', 'preparing', 'delivering'];
+
+// Linear status progression — drives the big "next step" button on each card.
+const STATUS_NEXT = {
+  pending:    { status: 'confirmed',  label: 'Confirmar pedido' },
+  confirmed:  { status: 'preparing',  label: 'Preparando' },
+  preparing:  { status: 'delivering', label: 'En camino' },
+  delivering: { status: 'delivered',  label: 'Entregado' },
+};
+
+async function notifyAllDriversWhatsApp(order) {
+  try {
+    const res = await fetch('/api/admin/notifyAllDrivers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ order }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) return { ok: false, error: data.error || 'Error al enviar' };
+    return { ok: true, sent: data.sent, failed: data.failed };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Error de conexión' };
+  }
+}
 
 async function notifyDriverWhatsApp(order, driverId) {
   if (!driverId) return { ok: false, error: 'Sin repartidor asignado' };
@@ -96,6 +120,7 @@ function AdminOrdersInner() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [soundOk, setSoundOk] = useState(false);
   const [assigningDriver, setAssigningDriver] = useState({});
+  const [advancingStatus, setAdvancingStatus] = useState({});
 
   const alertedIdsRef = useRef(new Set());
   const seededRef = useRef(false);
@@ -120,9 +145,7 @@ function AdminOrdersInner() {
       const data = await db.select('orders', {});
       return data || [];
     },
-    refetchInterval: 8000,
-    // 🔴 CLAVE: sin esto React Query PARA el polling cuando la pestaña
-    // está en segundo plano -> el panel no se entera de nuevos pedidos.
+    refetchInterval: 30000, // SSE handles realtime; polling is a fallback
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -166,6 +189,38 @@ function AdminOrdersInner() {
     }
   }, [orders, isAuthed, isSuccess]);
 
+  // SSE: instant push when a new order arrives — refetch immediately instead of
+  // waiting for the 30 s polling fallback. Auto-reconnects with backoff.
+  useEffect(() => {
+    if (!isAuthed) return;
+    let es;
+    let retryTimer;
+    let retryDelay = 2000;
+
+    function connect() {
+      es = new EventSource('/api/admin/orderStream', { withCredentials: true });
+      es.onopen = () => { retryDelay = 2000; };
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'new_order') {
+            queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+          }
+        } catch (_) {}
+      };
+      es.onerror = () => {
+        es.close();
+        retryTimer = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 2, 30000);
+          connect();
+        }, retryDelay);
+      };
+    }
+
+    connect();
+    return () => { if (es) es.close(); clearTimeout(retryTimer); };
+  }, [isAuthed, queryClient]);
+
   // Orders refresh on visibility change / reconnect (replaces Supabase Realtime).
   useEffect(() => {
     const onWake = () => {
@@ -194,8 +249,9 @@ function AdminOrdersInner() {
       const parts = [];
 
       // ── Browser-side print FIRST (USB / dialog modes require a live user gesture)
-      // Trigger before any async server call so the activation context is preserved.
-      if (cfg.auto_print === true && cfg.print_mode !== 'network') {
+      // Always print on confirm — trigger before any async server call so the
+      // activation context is preserved for window.print() / USB.
+      if (cfg.print_mode !== 'network') {
         const order = orders.find(o => o.id === orderId);
         if (order) {
           const printResult = await triggerPrint(order, cfg);
@@ -203,9 +259,8 @@ function AdminOrdersInner() {
         }
       }
 
-      // ── Server call: persists status + runs network print + sends WhatsApp ──
-      // Network print config is sent only when auto_print is explicitly enabled.
-      const printerConfig = cfg.print_mode === 'network' && cfg.auto_print === true
+      // ── Server call: persists status + runs network print ──
+      const printerConfig = cfg.print_mode === 'network'
         ? { mode: 'network', ip: cfg.network_ip, port: cfg.network_port || '9100', widthMm: cfg.printer_id === 'generic-58' ? 58 : 80 }
         : null;
 
@@ -254,6 +309,29 @@ function AdminOrdersInner() {
     queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
   };
 
+  // Advance order to next status; on confirm → also broadcast WhatsApp + print.
+  const handleAdvanceStatus = async (order) => {
+    const next = STATUS_NEXT[order.status];
+    if (!next) return;
+    setAdvancingStatus(prev => ({ ...prev, [order.id]: true }));
+    try {
+      if (next.status === 'confirmed') {
+        // existing confirm flow handles print
+        await updateStatus(order.id, 'confirmed');
+        // always notify ALL active drivers on confirmation
+        const waResult = await notifyAllDriversWhatsApp(order);
+        if (waResult.ok && waResult.sent > 0) {
+          toast({ title: `📱 ${waResult.sent} repartidor${waResult.sent === 1 ? '' : 'es'} avisado${waResult.sent === 1 ? '' : 's'}`, duration: 3000 });
+        }
+      } else {
+        await updateStatus(order.id, next.status);
+        toast({ title: `✅ ${STATUS_CONFIG[next.status]?.label}`, duration: 2000 });
+      }
+    } finally {
+      setAdvancingStatus(prev => ({ ...prev, [order.id]: false }));
+    }
+  };
+
   const handleReprintOrder = async (order) => {
     const cfg = loadPrintConfig();
     const result = await triggerPrint(order, cfg);
@@ -265,16 +343,27 @@ function AdminOrdersInner() {
     });
   };
 
-  const handleAssignDriver = async (orderId, driverId) => {
+  const handleAssignDriver = async (order, driverId) => {
+    const orderId = order.id;
     setAssigningDriver(prev => ({ ...prev, [orderId]: true }));
     try {
       await fetch(`/api/admin/orders/${orderId}/assignDriver`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
+        credentials: 'include',
         body: JSON.stringify({ driver_id: driverId || null }),
       });
       queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+
+      // Auto-send WhatsApp via green-api when a driver is assigned
+      if (driverId) {
+        const result = await notifyDriverWhatsApp(order, driverId);
+        if (result.ok) {
+          toast({ title: '✅ WhatsApp enviado al repartidor', duration: 3000 });
+        } else {
+          toast({ title: '⚠️ WhatsApp no enviado', description: result.error, variant: 'destructive', duration: 5000 });
+        }
+      }
     } finally {
       setAssigningDriver(prev => ({ ...prev, [orderId]: false }));
     }
@@ -419,7 +508,7 @@ function AdminOrdersInner() {
                   const status = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
                   const Icon = status.icon;
                   return (
-                    <div key={order.id} className={`bg-card rounded-2xl border-2 p-5 ${status.color.split(' ')[2] || 'border-border'}`}>
+                    <div key={order.id} className={`rounded-2xl border-2 p-5 ${status.cardClass || 'bg-card border-border'}`}>
                       <div className="flex items-start justify-between mb-3">
                         <div>
                           <p className="text-xs text-muted-foreground">
@@ -453,18 +542,21 @@ function AdminOrdersInner() {
                         ))}
                       </div>
 
-                      <Select value={order.status} onValueChange={val => updateStatus(order.id, val)}>
-                        <SelectTrigger className="rounded-xl text-sm">
-                          <SelectValue placeholder="Cambiar estado" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(STATUS_CONFIG).map(([val, cfg]) => (
-                            <SelectItem key={val} value={val}>{cfg.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {/* ── Big next-status button ── */}
+                      {STATUS_NEXT[order.status] && (
+                        <button
+                          onClick={() => handleAdvanceStatus(order)}
+                          disabled={!!advancingStatus[order.id]}
+                          className="w-full mt-3 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-bold rounded-xl py-3.5 text-sm transition-colors shadow-sm"
+                        >
+                          {advancingStatus[order.id]
+                            ? <><RotateCcw className="w-4 h-4 animate-spin" /> Procesando...</>
+                            : <><CheckCircle className="w-4 h-4" /> {STATUS_NEXT[order.status].label}</>
+                          }
+                        </button>
+                      )}
 
-                      {/* Driver assignment — only for delivery orders in active statuses */}
+                      {/* Driver assignment — delivery orders only */}
                       {order.order_type === 'delivery' && DRIVER_ASSIGN_STATUSES.includes(order.status) && (
                         <div className="mt-2">
                           <label className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1">
@@ -472,7 +564,7 @@ function AdminOrdersInner() {
                           </label>
                           <Select
                             value={order.assigned_driver_id || 'none'}
-                            onValueChange={val => handleAssignDriver(order.id, val === 'none' ? null : val)}
+                            onValueChange={val => handleAssignDriver(order, val === 'none' ? null : val)}
                             disabled={assigningDriver[order.id]}
                           >
                             <SelectTrigger className="rounded-xl text-sm bg-purple-50 border-purple-200">
@@ -488,6 +580,7 @@ function AdminOrdersInner() {
                         </div>
                       )}
 
+                      {/* Cancel */}
                       {refundConfirmId === order.id ? (
                         <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-3">
                           <p className="text-red-800 text-xs font-semibold flex items-center gap-1 mb-2">
@@ -507,26 +600,25 @@ function AdminOrdersInner() {
                         </Button>
                       )}
 
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <a href={`/repartidor?orderId=${order.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 text-xs bg-primary/10 text-primary border border-primary/20 rounded-xl py-2 hover:bg-primary/20 transition-colors font-medium">
-                          <Bike className="w-3.5 h-3.5" />
-                          Enlace repartidor
-                        </a>
-                        <a href={`/seguimiento?orderId=${order.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-xl py-2 hover:bg-blue-100 transition-colors font-medium">
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          Ver seguimiento
-                        </a>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <a href={`https://wa.me/?text=${encodeURIComponent(`Hola! Aquí tienes el enlace para el pedido: ${window.location.origin}/repartidor?orderId=${order.id}`)}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 text-xs bg-green-50 text-green-700 border border-green-200 rounded-xl py-2 hover:bg-green-100 transition-colors font-medium">
+                      {/* Broadcast to all drivers — delivery only */}
+                      {order.order_type === 'delivery' && (
+                        <button
+                          onClick={async () => {
+                            const result = await notifyAllDriversWhatsApp(order);
+                            if (result.ok) {
+                              toast({ title: `✅ Mensaje enviado a ${result.sent} repartidor${result.sent === 1 ? '' : 'es'}`, duration: 3000 });
+                            } else {
+                              toast({ title: '⚠️ Error al avisar', description: result.error, variant: 'destructive', duration: 4000 });
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs bg-green-600 text-white rounded-xl py-2 hover:bg-green-700 transition-colors font-medium mt-2"
+                        >
                           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                          Enviar al repartidor
-                        </a>
-                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/repartidor?orderId=${order.id}`); setCopiedId(order.id); setTimeout(() => setCopiedId(null), 2000); }} className="flex items-center justify-center gap-1.5 text-xs bg-muted text-muted-foreground border border-border rounded-xl py-2 hover:bg-muted/80 transition-colors font-medium">
-                          {copiedId === order.id ? <><CheckCircle className="w-3.5 h-3.5 text-green-600" /><span className="text-green-600">¡Copiado!</span></> : <><Copy className="w-3.5 h-3.5" />Copiar enlace</>}
+                          Avisar a todos los repartidores
                         </button>
-                      </div>
-                      {/* Reimprimir — persistent recovery button visible on all active orders */}
+                      )}
+
+                      {/* Reprint */}
                       <button
                         onClick={() => handleReprintOrder(order)}
                         className="w-full mt-2 flex items-center justify-center gap-1.5 text-xs bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2 hover:bg-gray-100 transition-colors font-medium"
@@ -534,8 +626,6 @@ function AdminOrdersInner() {
                         <Printer className="w-3.5 h-3.5" />
                         Reimprimir ticket
                       </button>
-
-                      <ThermerShare order={order} />
                     </div>
                   );
                 })}
