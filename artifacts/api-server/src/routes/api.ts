@@ -50,7 +50,7 @@ function calcDeliveryFee(km: number): number {
 router.get("/toppings", async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT * FROM "toppings" WHERE "available" = true ORDER BY "sort_order" ASC`,
+      `SELECT * FROM "toppings" WHERE "available" = true ORDER BY "name" ASC`,
     );
     return res.json({ data: rows });
   } catch (err: any) {
@@ -68,6 +68,25 @@ router.get("/menuItems", async (req, res) => {
     return res.json({ data: rows });
   } catch (err: any) {
     req.log.error({ err }, "menuItems error");
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Sales counts (for frontend sorting) ───────────────────────────────────
+router.get("/salesCounts", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT item->>'name' AS name,
+             SUM((item->>'quantity')::int) AS total_sold
+      FROM orders,
+           jsonb_array_elements(items::jsonb) AS item
+      GROUP BY item->>'name'
+    `);
+    const counts: Record<string, number> = {};
+    rows.forEach((r: any) => { counts[r.name] = parseInt(r.total_sold, 10); });
+    return res.json({ data: counts });
+  } catch (err: any) {
+    req.log.error({ err }, "salesCounts error");
     return res.status(500).json({ error: err.message });
   }
 });

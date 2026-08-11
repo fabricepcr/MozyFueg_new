@@ -14,3 +14,10 @@ export const fetchToppings = async () => {
   const json = await res.json();
   return json.data || [];
 };
+
+export const fetchSalesCounts = async () => {
+  const res = await fetch('/api/salesCounts');
+  if (!res.ok) throw new Error(`salesCounts fetch failed: ${res.status}`);
+  const json = await res.json();
+  return json.data || {};
+};

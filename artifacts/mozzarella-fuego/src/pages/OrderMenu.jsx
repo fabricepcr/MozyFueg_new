@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchMenuItems } from '@/lib/api';
+import { fetchMenuItems, fetchSalesCounts } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Search, AlertCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,12 @@ export default function OrderMenu() {
     queryFn: fetchMenuItems,
     refetchOnWindowFocus: true,
     refetchInterval: 60000, // refresca la disponibilidad cada minuto
+  });
+
+  const { data: salesCounts = {} } = useQuery({
+    queryKey: ['salesCounts'],
+    queryFn: fetchSalesCounts,
+    staleTime: 5 * 60 * 1000, // ventas no cambian tan rápido
   });
 
   const { data: storeSettings } = useStoreSettings();
@@ -91,9 +97,16 @@ export default function OrderMenu() {
     return [...Array.from(pizzaMap.values()), ...others].sort((a, b) => {
       const catDiff = (categoryOrder[a.category] ?? 99) - (categoryOrder[b.category] ?? 99);
       if (catDiff !== 0) return catDiff;
+      // Pizzas: ordenar por ventas (más vendidas primero)
+      const isPizza = a.category === 'pizzas' || a.category === 'pizzas_dulces';
+      if (isPizza) {
+        const aSales = salesCounts[a.name] ?? 0;
+        const bSales = salesCounts[b.name] ?? 0;
+        if (bSales !== aSales) return bSales - aSales;
+      }
       return (a.sort_order || 0) - (b.sort_order || 0);
     });
-  }, [menuItems]);
+  }, [menuItems, salesCounts]);
 
   const filteredItems = processedItems.filter(item => {
     const matchesCategory = category === 'all' || item.category === category;
