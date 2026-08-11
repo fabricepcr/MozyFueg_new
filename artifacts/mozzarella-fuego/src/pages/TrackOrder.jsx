@@ -7,6 +7,34 @@ import L from 'leaflet';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 
+// ── Per-item detail: toppings added + ingredients removed ───────────────────
+function OrderItemDetail({ flavors }) {
+  if (!flavors?.length) return null;
+  const multi = flavors.length > 1;
+  const hasAny = flavors.some(f => f.toppings?.length > 0 || f.removed?.length > 0);
+  if (!hasAny) return null;
+  return (
+    <div className="mt-0.5 space-y-0.5 ml-2">
+      {flavors.map((f, fi) => {
+        const hasTops = f.toppings?.length > 0;
+        const hasRem  = f.removed?.length  > 0;
+        if (!hasTops && !hasRem) return null;
+        return (
+          <div key={fi}>
+            {multi && <p className="text-xs text-muted-foreground font-medium">↳ {(f.name || '').replace(/^Pizza /i, '')}</p>}
+            {(f.toppings || []).map((t, ti) => (
+              <p key={ti} className={`text-xs text-emerald-600 ${multi ? 'ml-3' : ''}`}>+ {t.name}</p>
+            ))}
+            {(f.removed || []).map((r, ri) => (
+              <p key={ri} className={`text-xs text-red-500 line-through ${multi ? 'ml-3' : ''}`}>− {r}</p>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -244,9 +272,12 @@ export default function TrackOrder() {
           <div className="bg-card rounded-2xl border border-border/50 p-4 text-left mb-6">
             <p className="text-xs text-muted-foreground mb-1">Pedido #{orderId?.slice(-6).toUpperCase()}</p>
             {(order.items || []).map((item, i) => (
-              <div key={i} className="flex justify-between text-sm py-0.5 text-foreground/80">
-                <span>{item.quantity}x {item.name}</span>
-                <span>{(item.price * item.quantity).toFixed(2)} €</span>
+              <div key={i} className="py-0.5">
+                <div className="flex justify-between text-sm text-foreground/80">
+                  <span>{item.quantity}x {item.name}</span>
+                  <span>{(item.price * item.quantity).toFixed(2)} €</span>
+                </div>
+                <OrderItemDetail flavors={item.flavors} />
               </div>
             ))}
             <div className="border-t mt-2 pt-2 flex justify-between font-bold text-sm">
@@ -416,9 +447,12 @@ export default function TrackOrder() {
 
           <div className="border-t pt-3">
             {(order.items || []).map((item, i) => (
-              <div key={i} className="flex justify-between text-sm py-0.5 text-foreground/80">
-                <span>{item.quantity}x {item.name}</span>
-                <span>{(item.price * item.quantity).toFixed(2)} €</span>
+              <div key={i} className="py-0.5">
+                <div className="flex justify-between text-sm text-foreground/80">
+                  <span>{item.quantity}x {item.name}</span>
+                  <span>{(item.price * item.quantity).toFixed(2)} €</span>
+                </div>
+                <OrderItemDetail flavors={item.flavors} />
               </div>
             ))}
             <div className="border-t mt-2 pt-2 flex justify-between font-bold">

@@ -10,6 +10,34 @@ import { useCart } from '@/lib/CartContext';
 import { useToast } from '@/components/ui/use-toast';
 import { useStoreSettings } from '@/lib/useStoreSettings';
 
+// ── Per-item detail: toppings added + ingredients removed ───────────────────
+function CartItemDetail({ flavors }) {
+  if (!flavors?.length) return null;
+  const multi = flavors.length > 1;
+  const hasAny = flavors.some(f => f.toppings?.length > 0 || f.removed?.length > 0);
+  if (!hasAny) return null;
+  return (
+    <div className="mt-1 space-y-0.5 ml-2">
+      {flavors.map((f, fi) => {
+        const hasTops = f.toppings?.length > 0;
+        const hasRem  = f.removed?.length  > 0;
+        if (!hasTops && !hasRem) return null;
+        return (
+          <div key={fi}>
+            {multi && <p className="text-xs text-muted-foreground font-medium">↳ {(f.name || '').replace(/^Pizza /i, '')}</p>}
+            {(f.toppings || []).map((t, ti) => (
+              <p key={ti} className={`text-xs text-emerald-600 ${multi ? 'ml-3' : ''}`}>+ {t.name}</p>
+            ))}
+            {(f.removed || []).map((r, ri) => (
+              <p key={ri} className={`text-xs text-red-500 line-through ${multi ? 'ml-3' : ''}`}>− {r}</p>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Opening-hours validation ─────────────────────────────────────────────────
 const DAY_KEY  = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 const DAY_ES   = ['domingos','lunes','martes','miércoles','jueves','viernes','sábados'];
@@ -498,9 +526,7 @@ export default function Checkout() {
                     <span className="font-medium">{item.quantity}x {item.name}</span>
                     <span className="text-primary font-semibold">{(item.price * item.quantity).toFixed(2)} €</span>
                   </div>
-                  {item.removed_ingredients?.length > 0 && (
-                    <p className="text-xs text-slate-500 mt-0.5">Quitar: {item.removed_ingredients.map(r => r.replace(/^Sin /, '')).join(', ')}</p>
-                  )}
+                  <CartItemDetail flavors={item._flavors} />
                 </div>
               ))}
             </div>
@@ -656,9 +682,7 @@ export default function Checkout() {
                   <span className="text-foreground/80">{item.quantity}x {item.name}</span>
                   <span className="font-medium">{(item.price * item.quantity).toFixed(2)} €</span>
                 </div>
-                {item.removed_ingredients?.length > 0 && (
-                  <p className="text-xs text-red-500 mt-0.5">Quitar: {item.removed_ingredients.map(r => r.replace(/^Sin /, '')).join(', ')}</p>
-                )}
+                <CartItemDetail flavors={item._flavors} />
               </div>
             ))}
           </div>
