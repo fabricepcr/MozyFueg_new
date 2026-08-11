@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/lib/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pizza, Save, CheckCircle2, XCircle } from 'lucide-react';
+import { Loader2, Pizza, Save, CheckCircle2, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -14,6 +14,9 @@ export default function PizzasPanel() {
   const [draft, setDraft] = useState({});        // { [id]: boolean } — overall availability
   const [draftSizes, setDraftSizes] = useState({}); // { [id]: { cm33: bool, cm24: bool } }
   const [saving, setSaving] = useState(false);
+  const [expandedIngredients, setExpandedIngredients] = useState({}); // { [id]: boolean }
+  const [draftIngredients, setDraftIngredients] = useState({});       // { [id]: string }
+  const [savingIngredients, setSavingIngredients] = useState({});     // { [id]: boolean }
 
   const { data: items = [], isLoading, isError } = useQuery({
     queryKey: ['admin-menu-items'],
@@ -29,16 +32,47 @@ export default function PizzasPanel() {
     if (!items.length) return;
     const initial = {};
     const initialSizes = {};
+    const initialIngredients = {};
     items.forEach(p => {
       initial[p.id] = p.available !== false;
       initialSizes[p.id] = {
         cm33: p.available_33cm !== false,
         cm24: p.available_24cm !== false,
       };
+      // Only set if not already being edited
+      initialIngredients[p.id] = p.ingredients ?? '';
     });
     setDraft(initial);
     setDraftSizes(initialSizes);
+    setDraftIngredients(prev => {
+      // Preserve any in-progress edits
+      const merged = { ...initialIngredients };
+      Object.keys(prev).forEach(id => { if (prev[id] !== undefined) merged[id] = prev[id]; });
+      return merged;
+    });
   }, [items]);
+
+  const toggleIngredientsExpand = (id) =>
+    setExpandedIngredients(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const handleSaveIngredients = async (item) => {
+    setSavingIngredients(prev => ({ ...prev, [item.id]: true }));
+    try {
+      await db.update(TABLE, item.id, { ingredients: draftIngredients[item.id] ?? '' });
+      await queryClient.invalidateQueries({ queryKey: ['admin-menu-items'] });
+      await queryClient.invalidateQueries({ queryKey: ['menu-items'] });
+      toast({
+        title: '✅ Ingredientes actualizados',
+        description: `${item.name} — ingredientes guardados.`,
+        duration: 3000,
+      });
+      setExpandedIngredients(prev => ({ ...prev, [item.id]: false }));
+    } catch (err) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive', duration: 5000 });
+    } finally {
+      setSavingIngredients(prev => ({ ...prev, [item.id]: false }));
+    }
+  };
 
   const toggle = (id) => setDraft(prev => ({ ...prev, [id]: !prev[id] }));
   const toggleSize = (id, key) =>
@@ -218,6 +252,63 @@ export default function PizzasPanel() {
                   <span className={`inline-block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${isOn ? 'translate-x-8' : 'translate-x-1'}`} />
                 </button>
               </div>
+
+              {/* Ingredients editor (pizzas only) */}
+              {item.category?.toLowerCase().includes('pizza') && (
+                <div className="mt-3 border-t border-border/30 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleIngredientsExpand(item.id)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {expandedIngredients[item.id]
+                      ? <ChevronUp className="w-3.5 h-3.5" />
+                      : <ChevronDown className="w-3.5 h-3.5" />}
+                    Editar ingredientes
+                    {draftIngredients[item.id] && (
+                      <span className="ml-1 text-muted-foreground/60 font-normal truncate max-w-[180px]">
+                        · {draftIngredients[item.id]}
+                      </span>
+                    )}
+                  </button>
+
+                  {expandedIngredients[item.id] && (
+                    <div className="mt-2 space-y-2">
+                      <input
+                        type="text"
+                        value={draftIngredients[item.id] ?? ''}
+                        onChange={e => setDraftIngredients(prev => ({ ...prev, [item.id]: e.target.value }))}
+                        placeholder="mozzarella, tomate, orégano, aceitunas…"
+                        className="w-full text-xs rounded-lg border border-border/60 bg-background px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                      />
+                      {/* Live chip preview */}
+                      {draftIngredients[item.id] && (
+                        <div className="flex flex-wrap gap-1">
+                          {draftIngredients[item.id]
+                            .split(/,\s*|\s+y\s+/)
+                            .map(s => s.trim())
+                            .filter(Boolean)
+                            .map((ing, idx) => (
+                              <span key={idx} className="text-[11px] bg-primary/10 text-primary border border-primary/20 rounded-full px-2 py-0.5">
+                                {ing}
+                              </span>
+                            ))}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleSaveIngredients(item)}
+                        disabled={savingIngredients[item.id]}
+                        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60"
+                      >
+                        {savingIngredients[item.id]
+                          ? <><Loader2 className="w-3 h-3 animate-spin" />Guardando…</>
+                          : <><Save className="w-3 h-3" />Guardar ingredientes</>}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

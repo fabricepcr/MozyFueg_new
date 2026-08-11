@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { runImageUrlMigration } from "./lib/imageMigration";
 import { runToppingsPriceMigration } from "./lib/toppingsMigration";
 import { runPizzaPriceMigration } from "./lib/pizzaPriceMigration";
+import { runIngredientsMigration } from "./lib/ingredientsMigration";
 
 const rawPort = process.env["PORT"];
 
@@ -39,5 +40,10 @@ app.listen(port, (err) => {
   // One-time migration: populate 24cm pizza prices where still NULL
   runPizzaPriceMigration().catch((e) =>
     logger.error({ err: e }, "Pizza price migration failed")
+  );
+
+  // Migration: add ingredients column and auto-populate from description
+  runIngredientsMigration().catch((e) =>
+    logger.error({ err: e }, "Ingredients migration failed")
   );
 });

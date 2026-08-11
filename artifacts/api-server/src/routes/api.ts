@@ -1029,7 +1029,7 @@ router.post('/admin/menuItems', async (req, res) => {
 router.patch('/admin/menuItems/:id', async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'available_33cm', 'available_24cm', 'sort_order'];
+    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'available_33cm', 'available_24cm', 'sort_order', 'ingredients'];
     const body = req.body as Record<string, any>;
     const entries = Object.entries(body).filter(([k]) => allowed.includes(k) && body[k] !== undefined);
     if (!entries.length) return res.status(400).json({ error: 'Nada que actualizar' });
@@ -1214,8 +1214,26 @@ function buildEscPosBuffer(order: any, widthMm = 80): Buffer {
     const price = `${(item.price * item.quantity).toFixed(2)}E`;
     const gap   = W - name.length - price.length;
     gap > 0 ? pushL(name + ' '.repeat(gap) + price) : (pushL(name), pushL(' '.repeat(Math.max(0, W - price.length)) + price));
-    for (const r of item.removed_ingredients || []) pushL(`  - SIN ${String(r).toUpperCase()}`);
-    for (const e of item.extras || [])               pushL(`  + ${e}`);
+
+    // Per-flavor removals and toppings (multi-flavor / mitad y mitad pizzas)
+    const flavors: any[] = item.flavors || [];
+    if (flavors.length > 1) {
+      for (const f of flavors) {
+        const fname = String(f.name || '').replace(/^Pizza /i, '');
+        push(...ESC_BOLD_ON); pushL(`  [${fname}]`); push(...ESC_BOLD_OFF);
+        for (const r of f.removed || []) pushL(`    - SIN ${String(r).toUpperCase()}`);
+        for (const t of f.toppings || []) pushL(`    + ${String(t.name || t)}`);
+      }
+    } else if (flavors.length === 1) {
+      // Single-flavor pizza — print removals and toppings without a flavor header
+      for (const r of flavors[0].removed || []) pushL(`  - SIN ${String(r).toUpperCase()}`);
+      for (const t of flavors[0].toppings || []) pushL(`  + ${String(t.name || t)}`);
+    } else {
+      // Legacy orders without flavors[] — fall back to flat list
+      for (const r of item.removed_ingredients || []) pushL(`  - SIN ${String(r).toUpperCase()}`);
+    }
+
+    for (const e of item.extras || []) pushL(`  + ${e}`);
   }
 
   pushL('='.repeat(W));

@@ -24,16 +24,28 @@ const DIVISIONS = [
 ];
 
 // ── Steps ─────────────────────────────────────────────────────────────────
-// Sweet pizzas skip the Toppings step
-const STEPS_SAVORY = ['tamano', 'division', 'sabores', 'toppings', 'confirmar'];
+// Sweet pizzas skip the Toppings/Quitar steps
+const STEPS_SAVORY = ['tamano', 'division', 'sabores', 'quitar', 'toppings', 'confirmar'];
 const STEPS_DULCE  = ['tamano', 'division', 'sabores', 'confirmar'];
 const STEP_LABELS  = {
   tamano:   'Tamaño',
   division: 'División',
   sabores:  'Sabores',
+  quitar:   'Ingredientes',
   toppings: 'Toppings',
   confirmar:'Confirmar',
 };
+
+// ── Parse ingredients from a pizza item ──────────────────────────────────
+function parseIngredients(item) {
+  const src = item?.ingredients || item?.description || '';
+  if (!src) return [];
+  // Split on ", " and " y " — typical Spanish description separators
+  return src
+    .split(/,\s*|\s+y\s+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
 
 // ── Topping price key based on size + portion count ───────────────────────
 function priceKeyFor(count, size) {
@@ -395,6 +407,13 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
     }
     return base;
   });
+  const [flavorRemovals, setFlavorRemovals] = useState(() => {
+    const base = Array(4).fill(null).map(() => []);
+    if (initialValues?.removals) {
+      initialValues.removals.forEach((rem, i) => { base[i] = rem || []; });
+    }
+    return base;
+  });
   const [pickingSlot,   setPickingSlot]   = useState(null); // flavor picker
   const [toppingSlot,   setToppingSlot]   = useState(null); // topping picker
 
@@ -441,6 +460,8 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
   // ── Flavor slot ────────────────────────────────────────────────────────
   const pickFlavor = (pizza) => {
     setFlavors(prev => { const n = [...prev]; n[pickingSlot] = { item: pizza }; return n; });
+    // Clear any stale removals for this slot — they belonged to the old pizza
+    setFlavorRemovals(prev => { const n = [...prev]; n[pickingSlot] = []; return n; });
     setPickingSlot(null);
   };
 
@@ -456,11 +477,24 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
     });
   };
 
+  // ── Ingredient removal toggle ──────────────────────────────────────────
+  const toggleRemoval = (slotIdx, ingredient) => {
+    setFlavorRemovals(prev => {
+      const next = prev.map(arr => [...arr]);
+      const slot = next[slotIdx];
+      const idx = slot.indexOf(ingredient);
+      if (idx >= 0) slot.splice(idx, 1);
+      else slot.push(ingredient);
+      return next;
+    });
+  };
+
   // ── Navigation ─────────────────────────────────────────────────────────
   const canNext = () => {
     if (currentStep === 'tamano')   return !!selectedSize;
     if (currentStep === 'division') return !!division;
     if (currentStep === 'sabores')  return allSlotsFilled;
+    if (currentStep === 'quitar')   return true; // optional
     if (currentStep === 'toppings') return true; // optional
     return false;
   };
@@ -476,6 +510,7 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
       toppings:  flavorToppings.slice(0, flavorCount).map(tops =>
         tops.map(t => ({ id: t.id, name: t.name, price: getTopPrice(t.id) }))
       ),
+      removals:  flavorRemovals.slice(0, flavorCount),
       basePrice,
       finalPrice,
     });
@@ -627,6 +662,72 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
                 </motion.div>
               )}
 
+              {/* ── Quitar ingredientes ───────────────────────────────── */}
+              {currentStep === 'quitar' && (
+                <motion.div key="quitar" {...slide} className="p-5">
+                  <h3 className="font-heading text-xl font-semibold mb-1">Quitar ingredientes</h3>
+                  <p className="text-sm text-muted-foreground mb-5">
+                    Opcional · Toca un ingrediente para quitarlo de tu pizza.
+                  </p>
+
+                  <div className="space-y-3">
+                    {activeFlavors.filter(Boolean).map((f, i) => {
+                      const ingredients = parseIngredients(f.item);
+                      if (!ingredients.length) return null;
+                      const removed = flavorRemovals[i] || [];
+                      return (
+                        <div key={i} className="rounded-2xl border border-border/50 bg-card overflow-hidden">
+                          {/* Flavor header */}
+                          <div className="flex items-center gap-3 px-4 py-3 border-b border-border/30">
+                            <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                              style={{ backgroundColor: SLOT_COLORS[i] }}>{i + 1}</div>
+                            <p className="font-semibold text-sm flex-1 truncate">{f.item.name.replace(/^Pizza /i, '')}</p>
+                            {removed.length > 0 && (
+                              <span className="text-xs text-red-500 font-semibold whitespace-nowrap">−{removed.length}</span>
+                            )}
+                          </div>
+
+                          {/* Ingredient pills */}
+                          <div className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {ingredients.map(ing => {
+                                const isRemoved = removed.includes(ing);
+                                return (
+                                  <button
+                                    key={ing}
+                                    onClick={() => toggleRemoval(i, ing)}
+                                    className={`flex items-center gap-1.5 text-xs rounded-full px-3 py-1.5 border font-medium transition-all ${
+                                      isRemoved
+                                        ? 'bg-red-50 text-red-600 border-red-300 line-through opacity-70'
+                                        : 'bg-muted/40 text-foreground border-border/50 hover:border-red-300 hover:bg-red-50 hover:text-red-600'
+                                    }`}
+                                  >
+                                    {isRemoved && <X className="w-3 h-3 flex-shrink-0" />}
+                                    {ing}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {removed.length > 0 && (
+                              <p className="text-xs text-muted-foreground mt-3">
+                                Sin: {removed.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {activeFlavors.filter(Boolean).every(f => !parseIngredients(f.item).length) && (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      <p>No hay datos de ingredientes disponibles.</p>
+                      <p className="text-xs mt-1">El equipo de cocina anotará tus preferencias.</p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
               {/* ── Toppings ──────────────────────────────────────────── */}
               {currentStep === 'toppings' && (
                 <motion.div key="toppings" {...slide} className="p-5">
@@ -723,6 +824,7 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
                     <div className="px-5 py-4 space-y-4">
                       {activeFlavors.filter(Boolean).map((f, i) => {
                         const slotTops = flavorToppings[i] || [];
+                        const slotRemoved = flavorRemovals[i] || [];
                         return (
                           <div key={i}>
                             <div className="flex items-start gap-3">
@@ -731,6 +833,15 @@ export default function PizzaWizard({ item, onClose, onConfirm, initialValues })
                                 <p className="font-semibold text-sm text-foreground">{f.item.name}</p>
                                 {f.item.description && (
                                   <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{f.item.description}</p>
+                                )}
+                                {slotRemoved.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {slotRemoved.map(ing => (
+                                      <span key={ing} className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-200 line-through">
+                                        {ing}
+                                      </span>
+                                    ))}
+                                  </div>
                                 )}
                                 {slotTops.length > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-2">

@@ -46,7 +46,7 @@ export default function CartDrawer({ storeOpen = true }) {
     soldOutItems.forEach(i => removeItem(i.id));
   };
 
-  const handleEditSave = ({ size, division, flavors, toppings, basePrice, finalPrice }) => {
+  const handleEditSave = ({ size, division, flavors, toppings, removals, basePrice, finalPrice }) => {
     const primaryFlavor = flavors?.[0];
     const primaryItem   = primaryFlavor?.item || editingItem._originalItem || editingItem;
     const sizeLabel     = size ? ` (${size})` : '';
@@ -66,6 +66,7 @@ export default function CartDrawer({ storeOpen = true }) {
         name:     f.item.name,
         price:    size === '24cm' ? (f.item.price_23cm ?? f.item.price) : f.item.price,
         toppings: toppings?.[i] || [],
+        removed:  removals?.[i] || [],
         _itemObj: f.item,
       })),
       _toppings:     toppings || [],
@@ -80,6 +81,7 @@ export default function CartDrawer({ storeOpen = true }) {
     division: item._division || null,
     flavors:  item._flavors || null,
     toppings: item._toppings || [],
+    removals: item._flavors ? item._flavors.map(f => f.removed || []) : [],
   });
 
   return (

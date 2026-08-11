@@ -41,7 +41,7 @@ export default function MenuItemCard({ item }) {
     }
   };
 
-  const handleConfirm = ({ size, division, flavors, toppings, basePrice, finalPrice }) => {
+  const handleConfirm = ({ size, division, flavors, toppings, removals, basePrice, finalPrice }) => {
     const primaryFlavor = flavors?.[0];
     const primaryItem   = primaryFlavor?.item || item;
     const sizeLabel     = size ? ` (${size})` : '';
@@ -63,6 +63,7 @@ export default function MenuItemCard({ item }) {
         name:     f.item.name,
         price:    size === '24cm' ? (f.item.price_23cm ?? f.item.price) : f.item.price,
         toppings: toppings?.[i] || [],
+        removed:  removals?.[i] || [],
         _itemObj: f.item,
       })),
       _toppings:     toppings || [],
