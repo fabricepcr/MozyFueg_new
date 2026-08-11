@@ -533,11 +533,35 @@ function AdminOrdersInner() {
                         {order.customer_notes && <p className="text-muted-foreground">📝 {order.customer_notes}</p>}
                       </div>
 
-                      <div className="space-y-1 mb-3">
+                      <div className="space-y-1.5 mb-3">
                         {(order.items || []).map((item, i) => (
-                          <div key={i} className="flex justify-between text-sm">
-                            <span>{item.quantity}x {item.name}</span>
-                            <span className="text-muted-foreground">{(item.price * item.quantity).toFixed(2)} €</span>
+                          <div key={i} className="text-sm">
+                            <div className="flex justify-between">
+                              <span className="font-medium">{item.quantity}x {item.name}</span>
+                              <span className="text-muted-foreground ml-2 flex-shrink-0">{(item.price * item.quantity).toFixed(2)} €</span>
+                            </div>
+                            {(item.flavors || []).length > 0 && (
+                              <div className="ml-3 mt-0.5 space-y-0.5">
+                                {item.flavors.map((f, fi) => (
+                                  <div key={fi}>
+                                    <div className="text-xs text-muted-foreground">↳ {f.name.replace(/^Pizza /i, '')}</div>
+                                    {(f.toppings || []).map((t, ti) => (
+                                      <div key={ti} className="text-xs text-emerald-700 ml-3">+ {t.name}</div>
+                                    ))}
+                                    {(f.removed || []).map((r, ri) => (
+                                      <div key={ri} className="text-xs text-red-500 ml-3">− {r}</div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {(item.extras || []).length > 0 && (
+                              <div className="ml-3 mt-0.5 space-y-0.5">
+                                {item.extras.map((e, ei) => (
+                                  <div key={ei} className="text-xs text-blue-600">+ {e.name}</div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

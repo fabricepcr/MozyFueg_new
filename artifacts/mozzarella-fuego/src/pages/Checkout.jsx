@@ -352,7 +352,7 @@ export default function Checkout() {
       removed_ingredients: i._flavors
         ? i._flavors.flatMap(f => f.removed || [])
         : (i.removed_ingredients || []),
-      flavors: i._flavors?.map(f => ({ id: f.id, name: f.name, removed: f.removed || [] })) || [],
+      flavors: i._flavors?.map(f => ({ id: f.id, name: f.name, removed: f.removed || [], toppings: f.toppings || [] })) || [],
       extras: i._extras?.map(e => ({ id: e.id, name: e.name, price: e.price })) || [],
     }));
 

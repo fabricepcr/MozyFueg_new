@@ -74,9 +74,6 @@ body {
 
 .badge { display: inline-block; border: 1px solid #000; padding: 1px 5px; font-weight: bold; font-size: 10px; margin-top: 2px; }
 
-.qr { text-align: center; margin: 5px 0; }
-.qr img { width: ${widthMm === 58 ? '22mm' : '28mm'}; height: auto; }
-
 .footer { text-align: center; font-size: 9px; margin-top: 8px; line-height: 1.7; }
 
 @media print {
@@ -94,17 +91,47 @@ export function buildTicketHTML(order, widthMm = 80) {
   const paymentLabel = PAYMENT_LABELS[order.payment_method] || (order.payment_method || '').toUpperCase();
   const isDelivery = order.order_type !== 'pickup';
 
+  const SABOR_LABELS = { 1: '1 SABOR', 2: '2 SABORES', 3: '3 SABORES', 4: '4 SABORES (CUARTOS)' };
+
   const itemsHTML = (order.items || []).map(item => {
-    const removedHTML = (item.removed_ingredients || []).map(r =>
-      `<div class="removed">${r}</div>`
-    ).join('');
+    const flavors = item.flavors || [];
+    const extras  = item.extras  || [];
+
+    let detailHTML = '';
+
+    if (flavors.length > 0) {
+      const saborLabel = SABOR_LABELS[flavors.length] || `${flavors.length} SABORES`;
+      detailHTML += `<div class="s b" style="margin-left:8px;margin-top:2px;letter-spacing:0.04em;">${saborLabel}</div>`;
+      flavors.forEach(f => {
+        detailHTML += `<div class="s b" style="margin-left:12px;">&#8627; ${(f.name || '').replace(/^Pizza /i, '')}</div>`;
+        (f.toppings || []).forEach(t => {
+          detailHTML += `<div class="s" style="margin-left:20px;">+ ${t.name}${t.price ? ` <span style="color:#555">${parseFloat(t.price).toFixed(2)}E</span>` : ''}</div>`;
+        });
+        (f.removed || []).forEach(r => {
+          detailHTML += `<div class="removed" style="margin-left:20px;">${r}</div>`;
+        });
+      });
+    } else {
+      // Non-pizza: old-style removed_ingredients
+      (item.removed_ingredients || []).forEach(r => {
+        detailHTML += `<div class="removed">${r}</div>`;
+      });
+    }
+
+    if (extras.length > 0) {
+      detailHTML += `<div class="s b" style="margin-left:8px;margin-top:2px;">EXTRAS:</div>`;
+      extras.forEach(e => {
+        detailHTML += `<div class="s" style="margin-left:14px;">+ ${e.name}${e.price ? ` <span style="color:#555">${parseFloat(e.price).toFixed(2)}E</span>` : ''}</div>`;
+      });
+    }
+
     return `
-      <div style="margin-bottom:3px;">
+      <div style="margin-bottom:5px;">
         <div class="row">
           <span class="name b">${item.quantity}x ${item.name}</span>
           <span class="price">${(item.price * item.quantity).toFixed(2)}E</span>
         </div>
-        ${removedHTML}
+        ${detailHTML}
       </div>`;
   }).join('');
 
@@ -112,10 +139,6 @@ export function buildTicketHTML(order, widthMm = 80) {
     ? `<div class="row s"><span>Envio a domicilio</span><span>${order.delivery_fee.toFixed(2)}E</span></div>` : '';
   const tipHTML = order.tip > 0
     ? `<div class="row s"><span>Propina</span><span>+${order.tip.toFixed(2)}E</span></div>` : '';
-
-  const trackUrl = `${window.location.origin}/seguimiento?orderId=${order.id || ''}`;
-  const qrSize   = widthMm === 58 ? '80x80' : '100x100';
-  const qrSrc    = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}&data=${encodeURIComponent(trackUrl)}`;
 
   return `
     <div class="c" style="margin-bottom:5px;">
@@ -176,11 +199,6 @@ export function buildTicketHTML(order, widthMm = 80) {
 
     <div class="dash"></div>
 
-    <div class="qr">
-      <div class="t">Sigue tu pedido</div>
-      <img src="${qrSrc}" alt="QR" />
-    </div>
-
     <div class="footer">
       &iexcl;Gracias por tu pedido!<br/>
       <span class="t">${dateStr} · #${orderId}</span>
@@ -215,12 +233,11 @@ export function printTicket(order) {
   pw.document.close();
   pw.focus();
 
-  // Esperar a que el QR cargue antes de imprimir
   const isAndroid = /android/i.test(navigator.userAgent);
   setTimeout(() => {
     pw.print();
-    if (!isAndroid) setTimeout(() => pw.close(), 1500);
-  }, isAndroid ? 1200 : 600);
+    if (!isAndroid) setTimeout(() => pw.close(), 1000);
+  }, isAndroid ? 800 : 300);
 
   return true;
 }
