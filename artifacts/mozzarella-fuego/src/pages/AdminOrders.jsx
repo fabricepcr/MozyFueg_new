@@ -266,7 +266,9 @@ function AdminOrdersInner() {
 
       const body = {
         ...(printerConfig ? { printer_config: printerConfig } : {}),
-        whatsapp: cfg.whatsapp_enabled === true,
+        // Delivery WhatsApp notifications are enforced by the server. Do not
+        // depend on this browser's localStorage configuration.
+        whatsapp: true,
       };
 
       const res = await fetch(`/api/admin/orders/${orderId}/confirm`, {
@@ -309,20 +311,16 @@ function AdminOrdersInner() {
     queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
   };
 
-  // Advance order to next status; on confirm → also broadcast WhatsApp + print.
+  // Advance order to next status. Confirmation handles print and WhatsApp
+  // together on the server so delivery notifications cannot be lost if the
+  // browser closes or a second client-side request fails.
   const handleAdvanceStatus = async (order) => {
     const next = STATUS_NEXT[order.status];
     if (!next) return;
     setAdvancingStatus(prev => ({ ...prev, [order.id]: true }));
     try {
       if (next.status === 'confirmed') {
-        // existing confirm flow handles print
         await updateStatus(order.id, 'confirmed');
-        // always notify ALL active drivers on confirmation
-        const waResult = await notifyAllDriversWhatsApp(order);
-        if (waResult.ok && waResult.sent > 0) {
-          toast({ title: `📱 ${waResult.sent} repartidor${waResult.sent === 1 ? '' : 'es'} avisado${waResult.sent === 1 ? '' : 's'}`, duration: 3000 });
-        }
       } else {
         await updateStatus(order.id, next.status);
         toast({ title: `✅ ${STATUS_CONFIG[next.status]?.label}`, duration: 2000 });

@@ -48,7 +48,6 @@ export default function PrintConfig() {
     auto_print: false,
     network_ip: '',
     network_port: '9100',
-    whatsapp_enabled: false,
     ...loadPrintConfig(),
   }));
   const [testing, setTesting] = useState(false);
@@ -212,15 +211,14 @@ export default function PrintConfig() {
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <MessageCircle className="w-4 h-4 text-green-600" />
-            <span className="font-semibold text-sm">WhatsApp al repartidor</span>
+            <span className="font-semibold text-sm">WhatsApp a repartidores</span>
           </div>
-          <Switch
-            checked={config.whatsapp_enabled}
-            onCheckedChange={v => update('whatsapp_enabled', v)}
-          />
+          <span className="text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-1">
+            Automático
+          </span>
         </div>
         <p className="text-xs text-muted-foreground mb-3">
-          Al confirmar un pedido a domicilio con repartidor asignado, se envía automáticamente un mensaje de WhatsApp con los detalles del pedido.
+          Al confirmar cualquier pedido a domicilio, el servidor envía automáticamente los detalles por WhatsApp a todos los repartidores activos. Los pedidos para recoger no generan mensajes.
         </p>
         <div className="bg-muted/40 rounded-xl p-3 space-y-2 text-xs">
           <p className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">Credenciales requeridas (secrets del servidor)</p>

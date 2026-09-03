@@ -1287,7 +1287,7 @@ function validatePrinterTarget(ip: string, portRaw: string): { ok: true; port: n
 // Single authenticated server endpoint that atomically:
 //  1. Sets status = 'confirmed'
 //  2. Sends ESC/POS to network printer (if printer_config.mode === 'network')
-//  3. Sends WhatsApp to assigned driver via green-api (if whatsapp === true)
+//  3. Sends WhatsApp to all active drivers for delivery orders (if enabled)
 // The status is always saved; print/WhatsApp failures are reported but don't
 // roll back the status change.
 router.post('/admin/orders/:id/confirm', async (req, res) => {
@@ -1336,52 +1336,48 @@ router.post('/admin/orders/:id/confirm', async (req, res) => {
       }
     }
 
-    // 3. WhatsApp notification (optional)
-    if (req.body.whatsapp === true && order.assigned_driver_id) {
+    // 3. WhatsApp notification (optional, delivery orders only)
+    if (order.order_type !== 'pickup') {
       const instanceId = process.env['GREEN_API_INSTANCE_ID'];
       const token      = process.env['GREEN_API_TOKEN'];
       if (!instanceId || !token) {
         result.whatsapp = { ok: false, error: 'GREEN_API no configurado' };
       } else {
         try {
-          const { rows: driverRows } = await pool.query(
-            `SELECT * FROM "delivery_guys" WHERE id = $1`,
-            [order.assigned_driver_id],
+          const { rows: drivers } = await pool.query(
+            `SELECT id, name, phone FROM "delivery_guys" WHERE active = true`,
           );
-          const driver = driverRows[0];
-          if (!driver) {
-            result.whatsapp = { ok: false, error: 'Repartidor no encontrado' };
+          if (!drivers.length) {
+            result.whatsapp = { ok: false, error: 'No hay repartidores activos' };
           } else {
-            let phone = String(driver.phone).replace(/\D/g, '');
-            if (phone.startsWith('6') || phone.startsWith('7') || phone.startsWith('9')) phone = '34' + phone;
-            const chatId = `${phone}@c.us`;
-            const oId    = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
-            const isDelivery = order.order_type !== 'pickup';
-            const itemsList  = ((order.items || []) as any[]).map((i: any) => `• ${i.quantity}x ${i.name}`).join('\n');
-            const lines = [
-              `🍕 *Nuevo pedido #${oId}*`, '',
-              `👤 *Cliente:* ${order.customer_name}`,
-              `📞 ${order.customer_phone}`,
-              isDelivery && order.customer_address ? `📍 ${order.customer_address}` : null,
-              order.customer_notes ? `📝 ${order.customer_notes}` : null,
-              '', '*Artículos:*', itemsList, '',
-              `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
-            ].filter((l): l is string => l !== null && l !== undefined);
-            const message = lines.join('\n');
-            const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
-            // Bound to 8 s so a stalled Green API never hangs the confirm response
-            const gRes  = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chatId, message }),
-              signal: AbortSignal.timeout(8000),
-            });
-            const gData = (await gRes.json()) as any;
-            result.whatsapp = gRes.ok && !gData.error
-              ? { ok: true, idMessage: gData.idMessage }
-              : { ok: false, error: gData.error || 'Error de green-api' };
+            const message = buildOrderMessage(order);
+            const sendResults = await Promise.all(drivers.map(async (driver: any) => {
+              try {
+                const idMessage = await sendGreenApi(instanceId, token, driver.phone, message);
+                req.log.info(
+                  { orderId, driverId: driver.id, driverName: driver.name, idMessage },
+                  'WhatsApp order notification sent',
+                );
+                return { name: driver.name, ok: true, idMessage };
+              } catch (sendErr: any) {
+                req.log.warn(
+                  { orderId, driverId: driver.id, driverName: driver.name, err: sendErr },
+                  'WhatsApp order notification failed',
+                );
+                return { name: driver.name, ok: false, error: sendErr.message };
+              }
+            }));
+            const failed = sendResults.filter((sendResult: any) => !sendResult.ok);
+            result.whatsapp = {
+              ok: failed.length === 0,
+              sent: sendResults.length - failed.length,
+              failed: failed.length,
+              results: sendResults,
+              ...(failed.length ? { error: `${failed.length} envío${failed.length === 1 ? '' : 's'} fallido${failed.length === 1 ? '' : 's'}` } : {}),
+            };
           }
         } catch (waErr: any) {
+          req.log.error({ orderId, err: waErr }, 'WhatsApp confirmation broadcast failed');
           result.whatsapp = { ok: false, error: waErr.message };
         }
       }
@@ -1466,10 +1462,48 @@ function normPhone(raw: string): string {
 async function sendGreenApi(instanceId: string, token: string, phone: string, message: string) {
   const chatId = `${normPhone(phone)}@c.us`;
   const url    = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
-  const gRes   = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId, message }) });
-  const gData  = (await gRes.json()) as any;
-  if (!gRes.ok || gData.error) throw new Error(gData.error || 'Error de green-api');
-  return gData.idMessage as string;
+  let lastError = 'Error de green-api';
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const gRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, message }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const raw = await gRes.text();
+      let gData: any = {};
+      try {
+        gData = raw ? JSON.parse(raw) : {};
+      } catch {
+        lastError = `Respuesta inválida de green-api (HTTP ${gRes.status})`;
+        if (gRes.status < 500 && gRes.status !== 429) throw new Error(lastError);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, attempt * 750));
+          continue;
+        }
+        throw new Error(lastError);
+      }
+
+      if (gRes.ok && !gData.error && gData.idMessage) {
+        return gData.idMessage as string;
+      }
+
+      lastError = String(gData.error || gData.message || `Error de green-api (HTTP ${gRes.status})`);
+      const transient = gRes.status === 429 || gRes.status >= 500;
+      if (!transient || attempt === 3) throw new Error(lastError);
+    } catch (err: any) {
+      lastError = err?.name === 'TimeoutError'
+        ? 'Timeout al contactar con green-api'
+        : (err?.message || lastError);
+      if (attempt === 3) throw new Error(`${lastError} después de 3 intentos`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, attempt * 750));
+  }
+
+  throw new Error(lastError);
 }
 
 router.post('/admin/notifyDriver', async (req, res) => {
@@ -1481,6 +1515,10 @@ router.post('/admin/notifyDriver', async (req, res) => {
     if (!instanceId || !token) return res.status(503).json({ error: 'GREEN_API no configurado.' });
     if (!order || !driver?.phone) return res.status(400).json({ error: 'order y driver.phone son requeridos' });
     const idMessage = await sendGreenApi(instanceId, token, driver.phone, buildOrderMessage(order));
+    req.log.info(
+      { orderId: order.id, driverId: driver.id, driverName: driver.name, idMessage },
+      'WhatsApp driver notification sent',
+    );
     return res.json({ success: true, idMessage });
   } catch (err: any) {
     req.log.error({ err }, 'admin/notifyDriver error');
@@ -1508,8 +1546,16 @@ router.post('/admin/notifyAllDrivers', async (req: any, res: any) => {
       drivers.map(async (d: any) => {
         try {
           const idMessage = await sendGreenApi(instanceId, token, d.phone, message);
+          req.log.info(
+            { orderId: order.id, driverId: d.id, driverName: d.name, idMessage },
+            'WhatsApp order notification sent',
+          );
           return { name: d.name, ok: true, idMessage };
         } catch (e: any) {
+          req.log.warn(
+            { orderId: order.id, driverId: d.id, driverName: d.name, err: e },
+            'WhatsApp order notification failed',
+          );
           return { name: d.name, ok: false, error: e.message };
         }
       }),
