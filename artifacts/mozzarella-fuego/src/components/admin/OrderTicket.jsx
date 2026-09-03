@@ -28,8 +28,9 @@ html {
 
 body {
   font-family: 'Courier New', Courier, monospace;
-  font-size: ${widthMm === 58 ? '10px' : '12px'};
-  line-height: 1.35;
+  font-size: ${widthMm === 58 ? '12px' : '14px'};
+  font-weight: bold;
+  line-height: 1.4;
   width: ${widthMm}mm;
   max-width: ${widthMm}mm;
   margin: 0;
@@ -53,9 +54,9 @@ body {
 .c  { text-align: center; }
 .r  { text-align: right; }
 .b  { font-weight: bold; }
-.s  { font-size: ${widthMm === 58 ? '9px' : '10px'}; }
-.t  { font-size: 9px; }
-.xl { font-size: ${widthMm === 58 ? '13px' : '15px'}; font-weight: bold; }
+.s  { font-size: ${widthMm === 58 ? '11px' : '13px'}; }
+.t  { font-size: 11px; }
+.xl { font-size: ${widthMm === 58 ? '16px' : '19px'}; font-weight: bold; }
 
 .dash   { border-top: 1px dashed #000; margin: 3px 0; }
 .solid  { border-top: 2px solid #000;  margin: 3px 0; }
@@ -65,16 +66,16 @@ body {
 .row .name  { flex: 1; word-break: break-word; }
 .row .price { white-space: nowrap; font-weight: bold; }
 
-.lbl { font-size: 8px; text-transform: uppercase; letter-spacing: 0.1em; color: #333; }
+.lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #000; }
 
 .removed::before { content: "- SIN "; font-weight: bold; }
-.removed { font-size: 9px; font-weight: bold; text-transform: uppercase; padding-left: 10px; }
+.removed { font-size: 11px; font-weight: bold; text-transform: uppercase; padding-left: 10px; }
 
-.total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: ${widthMm === 58 ? '13px' : '15px'}; margin: 3px 0; }
+.total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: ${widthMm === 58 ? '16px' : '19px'}; margin: 3px 0; }
 
-.badge { display: inline-block; border: 1px solid #000; padding: 1px 5px; font-weight: bold; font-size: 10px; margin-top: 2px; }
+.badge { display: inline-block; border: 2px solid #000; padding: 1px 5px; font-weight: bold; font-size: 12px; margin-top: 2px; }
 
-.footer { text-align: center; font-size: 9px; margin-top: 8px; line-height: 1.7; }
+.footer { text-align: center; font-size: 11px; margin-top: 8px; line-height: 1.7; }
 
 @media print {
   .no-print { display: none !important; }
@@ -277,7 +278,7 @@ export default function OrderTicket({ order, onClose }) {
           <div
             style={{
               fontFamily: "'Courier New', Courier, monospace",
-              fontSize: widthMm === 58 ? '10px' : '11px',
+              fontSize: widthMm === 58 ? '12px' : '14px',
               lineHeight: '1.35',
               width: `${widthMm - 8}mm`,
               margin: '0 auto',

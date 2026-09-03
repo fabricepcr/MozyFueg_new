@@ -1029,7 +1029,7 @@ router.post('/admin/menuItems', async (req, res) => {
 router.patch('/admin/menuItems/:id', async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'available_33cm', 'available_24cm', 'sort_order', 'ingredients'];
+    const allowed = ['name', 'description', 'price', 'price_23cm', 'category', 'image_url', 'available', 'sort_order', 'ingredients'];
     const body = req.body as Record<string, any>;
     const entries = Object.entries(body).filter(([k]) => allowed.includes(k) && body[k] !== undefined);
     if (!entries.length) return res.status(400).json({ error: 'Nada que actualizar' });

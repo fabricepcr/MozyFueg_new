@@ -11,8 +11,7 @@ export default function PizzasPanel() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [draft, setDraft] = useState({});        // { [id]: boolean } — overall availability
-  const [draftSizes, setDraftSizes] = useState({}); // { [id]: { cm33: bool, cm24: bool } }
+  const [draft, setDraft] = useState({});        // { [id]: boolean } — row/size availability
   const [saving, setSaving] = useState(false);
   const [expandedIngredients, setExpandedIngredients] = useState({}); // { [id]: boolean }
   const [draftIngredients, setDraftIngredients] = useState({});       // { [id]: string }
@@ -31,19 +30,13 @@ export default function PizzasPanel() {
   useEffect(() => {
     if (!items.length) return;
     const initial = {};
-    const initialSizes = {};
     const initialIngredients = {};
     items.forEach(p => {
       initial[p.id] = p.available !== false;
-      initialSizes[p.id] = {
-        cm33: p.available_33cm !== false,
-        cm24: p.available_24cm !== false,
-      };
       // Only set if not already being edited
       initialIngredients[p.id] = p.ingredients ?? '';
     });
     setDraft(initial);
-    setDraftSizes(initialSizes);
     setDraftIngredients(prev => {
       // Preserve any in-progress edits
       const merged = { ...initialIngredients };
@@ -75,9 +68,6 @@ export default function PizzasPanel() {
   };
 
   const toggle = (id) => setDraft(prev => ({ ...prev, [id]: !prev[id] }));
-  const toggleSize = (id, key) =>
-    setDraftSizes(prev => ({ ...prev, [id]: { ...prev[id], [key]: !prev[id]?.[key] } }));
-
   const setAll = (value) => {
     const next = {};
     items.forEach(p => { next[p.id] = value; });
@@ -85,22 +75,14 @@ export default function PizzasPanel() {
   };
 
   // Cambios pendientes = los que difieren de lo guardado en la BD.
-  const changed = items.filter(p => {
-    const sizes = draftSizes[p.id] ?? { cm33: true, cm24: true };
-    return (p.available !== false) !== draft[p.id]
-      || (p.available_33cm !== false) !== sizes.cm33
-      || (p.available_24cm !== false) !== sizes.cm24;
-  });
+  const changed = items.filter(p => (p.available !== false) !== draft[p.id]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       for (const p of changed) {
-        const sizes = draftSizes[p.id] ?? { cm33: true, cm24: true };
         await db.update(TABLE, p.id, {
           available: draft[p.id],
-          available_33cm: sizes.cm33,
-          available_24cm: sizes.cm24,
         });
       }
       await queryClient.invalidateQueries({ queryKey: ['admin-menu-items'] });
@@ -216,31 +198,6 @@ export default function PizzasPanel() {
                         <span className="text-muted-foreground ml-1">· {Number(item.price).toFixed(2)} €</span>
                       )}
                     </p>
-                    {/* Per-size toggles — only meaningful when item is available */}
-                    {isOn && (
-                      <div className="flex gap-2 mt-2 flex-wrap">
-                        {[
-                          { key: 'cm33', label: '33 cm' },
-                          { key: 'cm24', label: '24 cm' },
-                        ].map(({ key, label }) => {
-                          const sizeOn = draftSizes[item.id]?.[key] !== false;
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() => toggleSize(item.id, key)}
-                              className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
-                                sizeOn
-                                  ? 'bg-green-100 border-green-300 text-green-700'
-                                  : 'bg-red-100 border-red-300 text-red-600 line-through'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
                 </div>
 
