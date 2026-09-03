@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '@/lib/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, RotateCcw, AlertTriangle, ArrowLeft, Trash2, Volume2, VolumeX, Printer } from 'lucide-react';
+import { ChefHat, Bike, CheckCircle, XCircle, Package, RefreshCw, RotateCcw, AlertTriangle, ArrowLeft, Trash2, Volume2, VolumeX, Printer, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AdminLogin from '@/components/admin/AdminLogin';

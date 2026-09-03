@@ -1,0 +1,40 @@
+manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.
+react-dom_client.js?v=cf3e1352:17987 Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+orderSound.js:71 The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio
+ensureRunning @ orderSound.js:71
+react-router-dom.js?v=4fd5e985:4426 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+warnOnce @ react-router-dom.js?v=4fd5e985:4426
+react-router-dom.js?v=4fd5e985:4426 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+warnOnce @ react-router-dom.js?v=4fd5e985:4426
+manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.
+orderSound.js:71 The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio
+ensureRunning @ orderSound.js:71
+react-dom_client.js?v=cf3e1352:6264 ReferenceError: MessageCircle is not defined
+    at AdminOrders.jsx:691:36
+    at Array.map (<anonymous>)
+    at AdminOrdersInner (AdminOrders.jsx:552:31)
+    at react-stack-bottom-frame (react-dom_client.js?v=cf3e1352:17424:20)
+    at renderWithHooks (react-dom_client.js?v=cf3e1352:4206:24)
+    at updateFunctionComponent (react-dom_client.js?v=cf3e1352:6619:21)
+    at beginWork (react-dom_client.js?v=cf3e1352:7654:20)
+    at runWithFiberInDEV (react-dom_client.js?v=cf3e1352:1485:72)
+    at performUnitOfWork (react-dom_client.js?v=cf3e1352:10868:98)
+    at workLoopSync (react-dom_client.js?v=cf3e1352:10728:43)
+
+The above error occurred in the <AdminOrdersInner> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+defaultOnCaughtError @ react-dom_client.js?v=cf3e1352:6264
+ErrorBoundary.jsx:17 [ErrorBoundary] ReferenceError: MessageCircle is not defined
+    at AdminOrders.jsx:691:36
+    at Array.map (<anonymous>)
+    at AdminOrdersInner (AdminOrders.jsx:552:31)
+    at react-stack-bottom-frame (react-dom_client.js?v=cf3e1352:17424:20)
+    at renderWithHooks (react-dom_client.js?v=cf3e1352:4206:24)
+    at updateFunctionComponent (react-dom_client.js?v=cf3e1352:6619:21)
+    at beginWork (react-dom_client.js?v=cf3e1352:7654:20)
+    at runWithFiberInDEV (react-dom_client.js?v=cf3e1352:1485:72)
+    at performUnitOfWork (react-dom_client.js?v=cf3e1352:10868:98)
+    at workLoopSync (react-dom_client.js?v=cf3e1352:10728:43) Object
+(anonymous) @ ErrorBoundary.jsx:17
