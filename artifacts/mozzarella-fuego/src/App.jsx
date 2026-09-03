@@ -44,7 +44,7 @@ function App() {
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
         <CartProvider>
-          <Router>
+          <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <AuthenticatedApp />
           </Router>
           <Toaster />

@@ -104,12 +104,17 @@ async function notifyDriverWhatsApp(order, driverId) {
 
 function AdminOrdersInner() {
   const [isAuthed, setIsAuthed] = useState(() => sessionStorage.getItem('admin_auth') === '1');
+  const [authChecked, setAuthChecked] = useState(() => sessionStorage.getItem('admin_auth') !== '1');
   const [activeTab, setActiveTab] = useState('pedidos');
   const { toast } = useToast();
 
   // Verify the server session is still valid on mount (e.g. after page reload or expiry).
   useEffect(() => {
-    if (!isAuthed) return;
+    if (!isAuthed) {
+      setAuthChecked(true);
+      return;
+    }
+    setAuthChecked(false);
     fetch('/api/admin/me', { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
@@ -117,8 +122,9 @@ function AdminOrdersInner() {
           sessionStorage.removeItem('admin_auth');
           setIsAuthed(false);
         }
+        setAuthChecked(true);
       })
-      .catch(() => {}); // network error — keep showing UI; next API call will 401
+      .catch(() => setAuthChecked(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [refundingId, setRefundingId] = useState(null);
   const [refundConfirmId, setRefundConfirmId] = useState(null);
@@ -146,7 +152,7 @@ function AdminOrdersInner() {
       const json = await res.json();
       return json.data || [];
     },
-    enabled: isAuthed,
+    enabled: isAuthed && authChecked,
     staleTime: 30000,
   });
 
@@ -161,6 +167,7 @@ function AdminOrdersInner() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     staleTime: 0,
+    enabled: isAuthed && authChecked,
   });
 
   // Sistema de sonido: desbloqueo por gesto, reanudación al volver a la
@@ -173,7 +180,7 @@ function AdminOrdersInner() {
 
   // Detectar nuevos pedidos y avisar (sonido + banner + notificación).
   useEffect(() => {
-    if (!isAuthed) return;
+    if (!isAuthed || !authChecked) return;
     // Esperar a que la PRIMERA carga real haya terminado, si no se "gasta"
     // el seed con orders=[] y luego los pedidos antiguos parecen nuevos.
     if (!isSuccess) return;
@@ -198,12 +205,12 @@ function AdminOrdersInner() {
         }
       } catch (_) { /* la notificación nunca debe romper el panel */ }
     }
-  }, [orders, isAuthed, isSuccess]);
+  }, [orders, isAuthed, authChecked, isSuccess]);
 
   // SSE: instant push when a new order arrives — refetch immediately instead of
   // waiting for the 30 s polling fallback. Auto-reconnects with backoff.
   useEffect(() => {
-    if (!isAuthed) return;
+    if (!isAuthed || !authChecked) return;
     let es;
     let retryTimer;
     let retryDelay = 2000;
@@ -230,7 +237,7 @@ function AdminOrdersInner() {
 
     connect();
     return () => { if (es) es.close(); clearTimeout(retryTimer); };
-  }, [isAuthed, queryClient]);
+  }, [isAuthed, authChecked, queryClient]);
 
   // Orders refresh on visibility change / reconnect (replaces Supabase Realtime).
   useEffect(() => {
@@ -443,7 +450,12 @@ function AdminOrdersInner() {
       }
     } catch (_) {}
     setIsAuthed(true);
+    setAuthChecked(true);
   };
+
+  if (!authChecked) {
+    return <div className="min-h-screen bg-background flex items-center justify-center text-sm text-muted-foreground">Verificando sesión…</div>;
+  }
 
   if (!isAuthed) {
     return <AdminLogin onSuccess={handleLoginSuccess} />;

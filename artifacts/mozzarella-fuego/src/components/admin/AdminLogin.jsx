@@ -46,7 +46,18 @@ export default function AdminLogin({ onSuccess }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            name="username"
+            value="admin"
+            readOnly
+            autoComplete="username"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
           <Input
+            name="password"
             type="password"
             placeholder="Contraseña"
             value={password}

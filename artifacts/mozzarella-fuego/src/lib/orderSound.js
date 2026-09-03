@@ -109,7 +109,9 @@ export function initSound() {
   });
 
   const onWake = () => {
-    if (document.visibilityState === 'visible') ensureRunning();
+    // Do not create an AudioContext before a real user gesture. Browsers block
+    // that attempt and report noisy autoplay errors in the console.
+    if (audioCtx && document.visibilityState === 'visible') ensureRunning();
   };
   document.addEventListener('visibilitychange', onWake);
   window.addEventListener('focus', onWake);
@@ -127,7 +129,6 @@ export function initSound() {
     }
   }, 5000);
 
-  ensureRunning();
 }
 
 /* ---------------- Sonido ---------------- */

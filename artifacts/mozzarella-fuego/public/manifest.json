@@ -1,0 +1,16 @@
+{
+  "name": "Mozzarella y Fuego",
+  "short_name": "Mozzarella y Fuego",
+  "description": "Pizzería brasileña artesanal en Barcelona",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f2",
+  "theme_color": "#198849",
+  "icons": [
+    {
+      "src": "https://media.base44.com/images/public/69fe6a7e200b264bdf26cda6/c581ef93c_image.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
