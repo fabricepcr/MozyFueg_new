@@ -1,3 +1,4 @@
 - [Replit-Postgres-migration](replit-postgres-migration.md) — app was migrated from Supabase to Replit Postgres; no Supabase secrets needed; data imported via import-from-supabase.mjs.
 - [Supabase stub breaks reads](supabase-stub-broken-reads.md) — supabase.jsx is a no-op; all browser src/ fetches must use fetch('/api/...') not supabase.from().
 - [Base44-auth-stub](base44-auth-stub.md) — base44Client.js and app-params.js are no-op stubs; admin auth uses hardcoded password; AuthContext.jsx fetches public settings from /api/adminSettings.
+- [Driver delivery links](driver-delivery-links.md) — WhatsApp delivery actions use signed expiring links and require a confirmation POST so link previews cannot change orders.

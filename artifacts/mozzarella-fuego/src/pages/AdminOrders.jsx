@@ -49,9 +49,9 @@ const DRIVER_ASSIGN_STATUSES = ['pending', 'confirmed', 'preparing', 'delivering
 // Linear status progression — drives the big "next step" button on each card.
 const STATUS_NEXT = {
   pending:    { status: 'confirmed',  label: 'Confirmar pedido' },
-  confirmed:  { status: 'preparing',  label: 'Preparando' },
-  preparing:  { status: 'delivering', label: 'En camino' },
-  delivering: { status: 'delivered',  label: 'Entregado' },
+  confirmed:  { status: 'preparing',  label: 'Marcar como preparando' },
+  preparing:  { status: 'delivering', label: 'Marcar en camino' },
+  delivering: { status: 'delivered',  label: 'Marcar como entregado' },
 };
 
 async function notifyAllDriversWhatsApp(order) {
@@ -214,7 +214,7 @@ function AdminOrdersInner() {
       es.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
-          if (msg.type === 'new_order') {
+          if (msg.type === 'new_order' || msg.type === 'order_updated') {
             queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
           }
         } catch (_) {}

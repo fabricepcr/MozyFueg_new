@@ -1,5 +1,6 @@
 import { Router, json as expressJson, type IRouter } from "express";
 import * as net from "net";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { pool } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
 
@@ -8,6 +9,7 @@ const router: IRouter = Router();
 // Read from environment so it can be rotated without redeploying.
 // Falls back to the default only when the env var is absent (e.g. local dev without secrets).
 const ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "mozzarellayfuego123";
+const PUBLIC_APP_URL = (process.env["PUBLIC_APP_URL"] || "https://www.mozzarellayfuego.com").replace(/\/+$/, "");
 const RESTAURANT_LAT = 41.4116;
 const RESTAURANT_LNG = 2.1751;
 const MAX_DELIVERY_KM = 8;
@@ -96,6 +98,13 @@ const sseClients = new Set<any>();
 
 function broadcastNewOrder(orderId: string) {
   const payload = `data: ${JSON.stringify({ type: "new_order", id: orderId })}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch (_) { sseClients.delete(client); }
+  }
+}
+
+function broadcastOrderUpdated(orderId: string) {
+  const payload = `data: ${JSON.stringify({ type: "order_updated", id: orderId })}\n\n`;
   for (const client of sseClients) {
     try { client.write(payload); } catch (_) { sseClients.delete(client); }
   }
@@ -1350,10 +1359,18 @@ router.post('/admin/orders/:id/confirm', async (req, res) => {
           if (!drivers.length) {
             result.whatsapp = { ok: false, error: 'No hay repartidores activos' };
           } else {
-            const message = buildOrderMessage(order);
             const sendResults = await Promise.all(drivers.map(async (driver: any) => {
               try {
-                const idMessage = await sendGreenApi(instanceId, token, driver.phone, message);
+                const deliveryToken = createDriverDeliveryToken(order.id, driver.id);
+                const deliveredUrl = `${PUBLIC_APP_URL}/api/driver/orders/${deliveryToken}`;
+                const message = buildOrderMessage(order, true);
+                const idMessage = await sendGreenApiDeliveryButton(
+                  instanceId,
+                  token,
+                  driver.phone,
+                  message,
+                  deliveredUrl,
+                );
                 req.log.info(
                   { orderId, driverId: driver.id, driverName: driver.name, idMessage },
                   'WhatsApp order notification sent',
@@ -1424,7 +1441,46 @@ router.post('/admin/print', async (req, res) => {
 
 // ── Admin: WhatsApp notify driver via green-api ────────────────────────────
 // ── Shared: build WhatsApp order message ──────────────────────────────────
-function buildOrderMessage(order: any): string {
+const DRIVER_ACTION_TTL_MS = 48 * 60 * 60 * 1000;
+
+function driverActionSecret(): string {
+  return process.env['SESSION_SECRET'] || ADMIN_PASSWORD;
+}
+
+function createDriverDeliveryToken(orderId: string, driverId: string): string {
+  const payload = Buffer.from(JSON.stringify({
+    orderId,
+    driverId,
+    exp: Date.now() + DRIVER_ACTION_TTL_MS,
+  })).toString('base64url');
+  const signature = createHmac('sha256', driverActionSecret()).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifyDriverDeliveryToken(token: string): { orderId: string; driverId: string } | null {
+  try {
+    const [payload, suppliedSignature] = token.split('.');
+    if (!payload || !suppliedSignature) return null;
+    const expectedSignature = createHmac('sha256', driverActionSecret()).update(payload).digest('base64url');
+    const supplied = Buffer.from(suppliedSignature);
+    const expected = Buffer.from(expectedSignature);
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!UUID_RE.test(parsed.orderId) || !UUID_RE.test(parsed.driverId) || Number(parsed.exp) < Date.now()) return null;
+    return { orderId: parsed.orderId, driverId: parsed.driverId };
+  } catch {
+    return null;
+  }
+}
+
+function driverActionPage(title: string, message: string, token?: string): string {
+  const button = token
+    ? `<form method="post" action="/api/driver/orders/${token}/delivered"><button type="submit">Marcar como entregado</button></form>`
+    : '';
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f7f7f2;font-family:system-ui,sans-serif;color:#17251c;display:grid;min-height:100vh;place-items:center}.card{width:min(88vw,420px);background:white;border:1px solid #dce5dd;border-radius:20px;padding:28px;text-align:center;box-shadow:0 12px 35px #17351d18}h1{font-size:24px;margin:0 0 12px}p{color:#5c695f;line-height:1.5}button{width:100%;border:0;border-radius:14px;padding:15px;background:#199447;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-top:12px}</style></head><body><main class="card"><h1>${title}</h1><p>${message}</p>${button}</main></body></html>`;
+}
+
+function buildOrderMessage(order: any, includeDeliveryAction = false): string {
   const orderId    = ((order.id as string)?.slice(-6) || '??????').toUpperCase();
   const isDelivery = order.order_type !== 'pickup';
   const itemsList  = ((order.items || []) as any[]).map((i: any) => `• ${i.quantity}x ${i.name}`).join('\n');
@@ -1451,8 +1507,58 @@ function buildOrderMessage(order: any): string {
     '',
     `💶 *Total: ${(order.total || 0).toFixed(2)} €*`,
     `💳 *Pago:* ${paymentLabel}`,
+    includeDeliveryAction ? '' : null,
+    includeDeliveryAction ? '✅ *Clica aquí para confirmar la entrega:*' : null,
   ].filter((l): l is string => l !== null && l !== undefined).join('\n');
 }
+
+router.get('/driver/orders/:token', async (req, res) => {
+  const action = verifyDriverDeliveryToken(req.params['token']);
+  if (!action) {
+    return res.status(400).type('html').send(driverActionPage('Enlace no válido', 'Este enlace ha caducado o no es válido. Pide al restaurante que reenvíe el aviso.'));
+  }
+  const { rows } = await pool.query(
+    `SELECT status, order_type FROM "orders" WHERE id = $1`,
+    [action.orderId],
+  );
+  if (!rows.length) return res.status(404).type('html').send(driverActionPage('Pedido no encontrado', 'No hemos encontrado este pedido.'));
+  if (rows[0].status === 'delivered') return res.type('html').send(driverActionPage('Pedido ya entregado', 'Este pedido ya figura como entregado.'));
+  if (rows[0].order_type === 'pickup' || ['cancelled', 'refunded'].includes(rows[0].status)) {
+    return res.status(409).type('html').send(driverActionPage('No se puede actualizar', 'Este pedido no admite cambios desde este enlace.'));
+  }
+  return res.type('html').send(driverActionPage('Confirmar entrega', 'Pulsa el botón cuando el pedido se haya entregado al cliente.', req.params['token']));
+});
+
+router.post('/driver/orders/:token/delivered', async (req: any, res: any) => {
+  try {
+    const action = verifyDriverDeliveryToken(req.params['token']);
+    if (!action) {
+      return res.status(400).type('html').send(driverActionPage('Enlace no válido', 'Este enlace ha caducado o no es válido.'));
+    }
+    const { rows } = await pool.query(
+      `UPDATE "orders"
+       SET status = 'delivered', delivered_at = NOW(), assigned_driver_id = COALESCE(assigned_driver_id, $2)
+       WHERE id = $1
+         AND order_type <> 'pickup'
+         AND status NOT IN ('delivered', 'cancelled', 'refunded')
+       RETURNING id`,
+      [action.orderId, action.driverId],
+    );
+    if (!rows.length) {
+      const existing = await pool.query(`SELECT status FROM "orders" WHERE id = $1`, [action.orderId]);
+      if (existing.rows[0]?.status === 'delivered') {
+        return res.type('html').send(driverActionPage('Pedido ya entregado', 'Este pedido ya figura como entregado.'));
+      }
+      return res.status(409).type('html').send(driverActionPage('No se puede actualizar', 'El pedido fue cancelado, reembolsado o ya no admite este cambio.'));
+    }
+    broadcastOrderUpdated(action.orderId);
+    req.log.info({ orderId: action.orderId, driverId: action.driverId }, 'Order marked delivered from WhatsApp driver link');
+    return res.type('html').send(driverActionPage('Entrega confirmada', 'El pedido se ha marcado como entregado y el panel del restaurante ya está actualizado.'));
+  } catch (err: any) {
+    req.log.error({ err }, 'driver delivery confirmation error');
+    return res.status(500).type('html').send(driverActionPage('No se pudo confirmar', 'Ha ocurrido un error. Inténtalo de nuevo o llama al restaurante.'));
+  }
+});
 
 function normPhone(raw: string): string {
   const p = String(raw).replace(/\D/g, '');
@@ -1506,6 +1612,66 @@ async function sendGreenApi(instanceId: string, token: string, phone: string, me
   throw new Error(lastError);
 }
 
+async function sendGreenApiDeliveryButton(
+  instanceId: string,
+  token: string,
+  phone: string,
+  message: string,
+  deliveredUrl: string,
+) {
+  const chatId = `${normPhone(phone)}@c.us`;
+  const url = `https://api.green-api.com/waInstance${instanceId}/sendInteractiveButtons/${token}`;
+  let lastError = 'Error de green-api';
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const gRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId,
+          body: message,
+          footer: 'Mozzarella y Fuego',
+          buttons: [{
+            type: 'url',
+            buttonId: 'confirm-delivery',
+            buttonText: 'Confirmar la entrega',
+            url: deliveredUrl,
+          }],
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const raw = await gRes.text();
+      let gData: any = {};
+      try {
+        gData = raw ? JSON.parse(raw) : {};
+      } catch {
+        lastError = `Respuesta inválida de green-api (HTTP ${gRes.status})`;
+        if (gRes.status < 500 && gRes.status !== 429) throw new Error(lastError);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, attempt * 750));
+          continue;
+        }
+        throw new Error(lastError);
+      }
+
+      if (gRes.ok && !gData.error && gData.idMessage) return gData.idMessage as string;
+
+      lastError = String(gData.error || gData.message || `Error de green-api (HTTP ${gRes.status})`);
+      const transient = gRes.status === 429 || gRes.status >= 500;
+      if (!transient || attempt === 3) throw new Error(lastError);
+    } catch (err: any) {
+      lastError = err?.name === 'TimeoutError'
+        ? 'Timeout al contactar con green-api'
+        : (err?.message || lastError);
+      if (attempt === 3) throw new Error(`${lastError} después de 3 intentos`);
+    }
+    await new Promise(resolve => setTimeout(resolve, attempt * 750));
+  }
+
+  throw new Error(lastError);
+}
+
 router.post('/admin/notifyDriver', async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
@@ -1514,7 +1680,15 @@ router.post('/admin/notifyDriver', async (req, res) => {
     const token      = process.env['GREEN_API_TOKEN'];
     if (!instanceId || !token) return res.status(503).json({ error: 'GREEN_API no configurado.' });
     if (!order || !driver?.phone) return res.status(400).json({ error: 'order y driver.phone son requeridos' });
-    const idMessage = await sendGreenApi(instanceId, token, driver.phone, buildOrderMessage(order));
+    const deliveryToken = createDriverDeliveryToken(order.id, driver.id);
+    const deliveredUrl = `${PUBLIC_APP_URL}/api/driver/orders/${deliveryToken}`;
+    const idMessage = await sendGreenApiDeliveryButton(
+      instanceId,
+      token,
+      driver.phone,
+      buildOrderMessage(order, true),
+      deliveredUrl,
+    );
     req.log.info(
       { orderId: order.id, driverId: driver.id, driverName: driver.name, idMessage },
       'WhatsApp driver notification sent',
@@ -1541,11 +1715,13 @@ router.post('/admin/notifyAllDrivers', async (req: any, res: any) => {
     );
     if (!drivers.length) return res.status(400).json({ error: 'No hay repartidores activos.' });
 
-    const message = buildOrderMessage(order);
     const results = await Promise.all(
       drivers.map(async (d: any) => {
         try {
-          const idMessage = await sendGreenApi(instanceId, token, d.phone, message);
+          const deliveryToken = createDriverDeliveryToken(order.id, d.id);
+          const deliveredUrl = `${PUBLIC_APP_URL}/api/driver/orders/${deliveryToken}`;
+          const message = buildOrderMessage(order, true);
+          const idMessage = await sendGreenApiDeliveryButton(instanceId, token, d.phone, message, deliveredUrl);
           req.log.info(
             { orderId: order.id, driverId: d.id, driverName: d.name, idMessage },
             'WhatsApp order notification sent',
