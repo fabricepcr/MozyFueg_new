@@ -1,0 +1,34 @@
+manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. <URL>
+manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.
+index-HtGYHoes.js:8 ReferenceError: MessageCircle is not defined
+    at index-HtGYHoes.js:57:197353
+    at Array.map (<anonymous>)
+    at S8 (index-HtGYHoes.js:57:192037)
+    at cm (index-HtGYHoes.js:8:34167)
+    at Cm (index-HtGYHoes.js:8:62587)
+    at p0 (index-HtGYHoes.js:8:73139)
+    at F0 (index-HtGYHoes.js:8:107256)
+    at YT (index-HtGYHoes.js:8:106315)
+    at Qm (index-HtGYHoes.js:8:106145)
+    at z0 (index-HtGYHoes.js:8:103236)
+Xy @ index-HtGYHoes.js:8
+index-HtGYHoes.js:57 [ErrorBoundary] ReferenceError: MessageCircle is not defined
+    at index-HtGYHoes.js:57:197353
+    at Array.map (<anonymous>)
+    at S8 (index-HtGYHoes.js:57:192037)
+    at cm (index-HtGYHoes.js:8:34167)
+    at Cm (index-HtGYHoes.js:8:62587)
+    at p0 (index-HtGYHoes.js:8:73139)
+    at F0 (index-HtGYHoes.js:8:107256)
+    at YT (index-HtGYHoes.js:8:106315)
+    at Qm (index-HtGYHoes.js:8:106145)
+    at z0 (index-HtGYHoes.js:8:103236) Object
+componentDidCatch @ index-HtGYHoes.js:57
